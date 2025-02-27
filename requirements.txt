@@ -4,3 +4,6 @@ sqlalchemy
 passlib[bcrypt]
 python-dotenv
 pyjwt
+python-multipart
+jose
+psycopg2-binary

@@ -1,37 +1,35 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
 from datetime import timedelta
-from app.core.security import verify_password, create_access_token
-from app.models.user import User
+from fastapi.security import OAuth2PasswordRequestForm
+from app.core.security import create_access_token, pwd_context
+from app.db.session import get_db
+from app.models.user import User as DBUser
 from app.schemas.auth import Token
-from app.db.session import fake_users_db
+from app.schemas.user import UserCreate, UserResponse
 
 router = APIRouter()
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
-
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-@router.post("/signup/")
-def signup(user: User):
-    if user.username in fake_users_db:
+@router.post("/signup/", response_model=UserResponse)
+def signup(user: UserCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(DBUser).filter(DBUser.username == user.username).first()
+    if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
-    
-    hashed_password = verify_password(user.password)
-    fake_users_db[user.username] = {"email": user.email, "password": hashed_password}
-
-    return {"message": "User registered successfully"}
+    hashed_password = pwd_context.hash(user.password)
+    new_user = DBUser(username=user.username, email=user.email, hashed_password=hashed_password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
 
 @router.post("/login/", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = fake_users_db.get(form_data.username)
-
-    if not user or not verify_password(form_data.password, user["password"]):
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(DBUser).filter(DBUser.username == form_data.username).first()
+    if not user or not pwd_context.verify(form_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
     access_token = create_access_token(
-        data={"sub": form_data.username}, 
+        data={"sub": user.username},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-
     return {"access_token": access_token, "token_type": "bearer"}
