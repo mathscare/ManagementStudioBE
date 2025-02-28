@@ -1,3 +1,4 @@
+# app/models/event.py
 from sqlalchemy import Column, Integer, String, Boolean, Date, Float, Text
 from app.db.session import Base
 
@@ -19,5 +20,5 @@ class Event(Base):
     payment_status = Column(String)
     travel_accomodation = Column(String)
     website = Column(String)
-    attachments = Column(Text)  # Stored as a comma-separated string
-    status = Column(String, default="pending")  # New field, default "pending"
+    attachments = Column(Text)
+    status = Column(String, default="pending")

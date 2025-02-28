@@ -7,3 +7,6 @@ pyjwt
 python-multipart
 jose
 psycopg2-binary
+pydantic-settings
+alembic
+boto3

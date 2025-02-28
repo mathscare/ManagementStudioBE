@@ -1,9 +1,8 @@
-import os
-from dotenv import load_dotenv
+# app/core/config.py
+from app.core.settings import settings
 
-load_dotenv()
+SECRET_KEY = settings.secret_key
+ALGORITHM = settings.algorithm
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
+DATABASE_URL = settings.database_url
 
-SECRET_KEY = os.getenv("SECRET_KEY", "default_secret")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
-DATABASE_URL = os.getenv("DATABASE_URL")
