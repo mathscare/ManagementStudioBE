@@ -1,7 +1,7 @@
 # app/schemas/event.py
-from pydantic import BaseModel, HttpUrl
 from datetime import date
-from typing import Optional, List
+from pydantic import BaseModel, HttpUrl
+from typing import List, Optional
 
 class EventBase(BaseModel):
     contact_name: str
@@ -21,6 +21,8 @@ class EventBase(BaseModel):
     attachments: Optional[List[str]] = None
     status: Optional[str] = None
 
+
+
 class EventCreate(BaseModel):
     travel_accomodation: str
     contact_number: str
@@ -29,15 +31,16 @@ class EventCreate(BaseModel):
     expected_audience: int
     fees: float
     event_name: str
-    attachments: List[str] = []  # This field is not used for file uploads; it will be replaced by S3 URLs.
+    attachments: List[str] = []
     status: str
-    event_date: str  # You can use a date type if you prefer
+    event_date: date         # Change from str to date
     institute_name: str
     location: str
     website: Optional[HttpUrl] = None
     is_paid_event: bool
     email: str
     description: str
+
 
 
 class EventUpdate(BaseModel):
