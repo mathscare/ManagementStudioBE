@@ -61,6 +61,17 @@ def get_events(db: Session = Depends(get_db)):
             event.attachments = []
     return events
 
+@router.get("/{event_id}", response_model=Event)
+def get_events(
+    event_id: int,
+    db: Session = Depends(get_db)):
+    event = db.query(DBEvent).filter(DBEvent.id == event_id).first()
+    if event.attachments:
+        event.attachments = event.attachments.split(",")
+    else:
+        event.attachments = []
+    return event
+
 @router.put("/{event_id}/form", response_model=Event)
 def update_event_form(
     event_id: int,
