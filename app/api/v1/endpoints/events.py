@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File,Body
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File,Body,Query
 from sqlalchemy.orm import Session
 from typing import List
 import json
@@ -6,16 +6,6 @@ from app.db.session import get_db
 from app.models.event import Event as DBEvent
 from app.schemas.event import EventCreate, Event, EventUpdate, EventStatusUpdate
 from app.utils.s3 import upload_file_to_s3
-
-
-router = APIRouter()
-
-
-from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlalchemy.orm import Session
-from app.db.session import get_db
-from app.models.event import Event as DBEvent  # Your ORM model
-from app.schemas.event import EventCreate, Event  # Pydantic models for input and output
 
 router = APIRouter()
 
@@ -52,8 +42,12 @@ async def create_event_form(
     return db_event
 
 @router.get("/", response_model=List[Event])
-def get_events(db: Session = Depends(get_db)):
-    events = db.query(DBEvent).all()
+def get_events(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1),
+    db: Session = Depends(get_db)
+):
+    events = db.query(DBEvent).offset(offset).limit(limit).all()
     for event in events:
         if event.attachments:
             event.attachments = event.attachments.split(",")
@@ -62,7 +56,7 @@ def get_events(db: Session = Depends(get_db)):
     return events
 
 @router.get("/{event_id}", response_model=Event)
-def get_events(
+def get_sinlge_event(
     event_id: int,
     db: Session = Depends(get_db)):
     event = db.query(DBEvent).filter(DBEvent.id == event_id).first()

@@ -11,3 +11,4 @@ pydantic-settings
 alembic
 boto3
 python-jose
+pytest

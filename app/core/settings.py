@@ -1,6 +1,9 @@
 # app/core/settings.py
 from pydantic_settings import BaseSettings
 import os
+from dotenv import load_dotenv
+load_dotenv()  # This will load variables from a .env file in the current directory
+
 
 class Settings(BaseSettings):
     secret_key: str = os.getenv("SECRET_KEY")
