@@ -34,9 +34,6 @@ jobs:
           echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
           echo "AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}" >> $GITHUB_ENV
 
-      - name: Run Alembic Migrations Locally
-        run: |
-          alembic upgrade head
 
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@master
