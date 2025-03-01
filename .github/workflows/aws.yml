@@ -24,10 +24,6 @@ jobs:
           pip install -r requirements.txt
           pip install alembic gunicorn
 
-      - name: Run Alembic Migrations Locally
-        run: |
-          alembic upgrade head
-
       - name: Set Environment Variables
         run: |
           echo "ENV=production" >> $GITHUB_ENV
@@ -37,6 +33,10 @@ jobs:
           echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
           echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
           echo "AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}" >> $GITHUB_ENV
+
+      - name: Run Alembic Migrations Locally
+        run: |
+          alembic upgrade head
 
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@master
