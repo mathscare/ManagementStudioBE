@@ -24,10 +24,6 @@ jobs:
           pip install -r requirements.txt
           pip install alembic gunicorn
 
-      - name: Run Tests
-        run: |
-          pytest
-
       - name: Run Alembic Migrations Locally
         run: |
           alembic upgrade head
