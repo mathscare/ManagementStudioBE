@@ -12,6 +12,6 @@ class Settings(BaseSettings):
     AWS_S3_BUCKET: str
 
     class Config:
-        env_file = ".env.production" if os.getenv("ENV") == "production" else ".env.development"
+        env_file = ".env"
 
 settings = Settings()
