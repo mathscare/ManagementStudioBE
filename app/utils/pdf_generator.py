@@ -13,10 +13,17 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph
 from reportlab.lib.styles import ParagraphStyle
 from app.core.config import Google_maps_key
+from pathlib import Path
+
+
+
+base_dir = Path(__file__).parent  # directory of the current file
+semibold_font_path = base_dir / "fonts" / "Poppins-SemiBold.ttf"
+black_font_path = base_dir / "fonts" / "Poppins-SemiBold.ttf"
 
 # Register fonts with corrected file paths
-pdfmetrics.registerFont(TTFont("Poppins-SemiBold", r"app\utils\fonts\Poppins-SemiBold.ttf"))
-pdfmetrics.registerFont(TTFont("Poppins-Regular", r"app\utils\fonts\Poppins-Black.ttf"))
+pdfmetrics.registerFont(TTFont("Poppins-SemiBold", str(semibold_font_path)))
+pdfmetrics.registerFont(TTFont("Poppins-Regular", str(black_font_path)))
 
 def download_image(url: str) -> BytesIO:
     response = requests.get(url)
