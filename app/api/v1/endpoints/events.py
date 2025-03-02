@@ -9,12 +9,14 @@ from app.utils.s3 import upload_file_to_s3
 from app.utils.pdf_generator import generate_event_pdf
 from fastapi.responses import StreamingResponse
 from io import BytesIO
+import csv
+from io import StringIO, BytesIO
 
 
 router = APIRouter()
 
 @router.post("/", response_model=Event)
-async def create_event_form(
+async def create_event(
     event_data: EventCreate = Body(...),  # Now expecting a JSON body
     db: Session = Depends(get_db)
 ):
@@ -184,3 +186,77 @@ def get_event_pdf(event_id: int,
     
     return StreamingResponse(buffer, media_type="application/pdf",
                              headers={"Content-Disposition": f"inline; filename=event_{event_id}.pdf"})
+
+@router.get("/events/csv", response_class=StreamingResponse)
+def get_events_csv(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1),
+    db: Session = Depends(get_db)
+):
+    # Query events from the database with offset and limit.
+    events = db.query(DBEvent).offset(offset).limit(limit).all()
+    
+    # Create a CSV file in memory.
+    output = StringIO()
+    writer = csv.writer(output)
+    
+    # Write header row; adjust the headers according to your model.
+    headers = [
+        "id", "contact_name", "contact_number", "description", "email",
+        "event_date", "event_name", "expected_audience", "fees", "institute_name",
+        "is_paid_event", "location", "payment_status", "travel_accomodation",
+        "website", "attachments", "status"
+    ]
+    writer.writerow(headers)
+    
+    for event in events:
+        # If attachments is a string, assume it's already comma-separated; if it's a list, join it.
+        if event.attachments:
+            try:
+                # If attachments is already a list (from earlier processing)
+                attachments_str = ",".join(event.attachments)
+            except Exception:
+                attachments_str = event.attachments
+        else:
+            attachments_str = ""
+        
+        writer.writerow([
+            event.id,
+            event.contact_name,
+            event.contact_number,
+            event.description,
+            event.email,
+            event.event_date,
+            event.event_name,
+            event.expected_audience,
+            event.fees,
+            event.institute_name,
+            event.is_paid_event,
+            event.location,
+            event.payment_status,
+            event.travel_accomodation,
+            str(event.website) if event.website else "",
+            attachments_str,
+            event.status
+        ])
+    
+    csv_content = output.getvalue()
+    output.close()
+    
+    # Create a BytesIO stream from CSV content.
+    buffer = BytesIO(csv_content.encode("utf-8"))
+    
+    return StreamingResponse(
+        buffer,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=events.csv"}
+    )
+
+@router.delete("/{event_id}", response_model=dict)
+def delete_event(event_id: int, db: Session = Depends(get_db)):
+    db_event = db.query(DBEvent).filter(DBEvent.id == event_id).first()
+    if not db_event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    db.delete(db_event)
+    db.commit()
+    return {"message": f"Event with id {event_id} deleted successfully."}
