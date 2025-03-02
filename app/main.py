@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from app.api.v1.endpoints import auth, user, events
 
 app = FastAPI(
-    title="ManagementStudioBE",
+    title="MathscareDashbaordBE",
     description="Backend Docs For The Dashboard",
     version="1.0.0",
 )
