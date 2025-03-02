@@ -16,7 +16,7 @@ from io import StringIO, BytesIO
 router = APIRouter()
 
 @router.post("/", response_model=Event)
-async def create_event(
+async def create_event (
     event_data: EventCreate = Body(...),  # Now expecting a JSON body
     db: Session = Depends(get_db)
 ):
@@ -214,7 +214,7 @@ def get_events_csv(
         if event.attachments:
             try:
                 # If attachments is already a list (from earlier processing)
-                attachments_str = ",".join(event.attachments)
+                attachments_str = "".join(event.attachments)
             except Exception:
                 attachments_str = event.attachments
         else:
