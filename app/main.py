@@ -1,7 +1,11 @@
 from fastapi import FastAPI
 from app.api.v1.endpoints import auth, user, events
 
-app = FastAPI()
+app = FastAPI(
+    title="ManagementStudioBE",
+    description="Backend Docs For The Dashboard",
+    version="1.0.0",
+)
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(user.router, prefix="/users", tags=["Users"])
