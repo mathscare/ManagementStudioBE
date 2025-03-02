@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
     AWS_S3_BUCKET: str = os.getenv("AWS_S3_BUCKET")
+    Google_maps_key : str = os.getenv("Google_maps_key")
 
 
 settings = Settings()

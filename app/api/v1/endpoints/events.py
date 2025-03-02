@@ -6,6 +6,10 @@ from app.db.session import get_db
 from app.models.event import Event as DBEvent
 from app.schemas.event import EventCreate, Event, EventUpdate, EventStatusUpdate
 from app.utils.s3 import upload_file_to_s3
+from app.utils.pdf_generator import generate_event_pdf
+from fastapi.responses import StreamingResponse
+from io import BytesIO
+
 
 router = APIRouter()
 
@@ -41,6 +45,38 @@ async def create_event_form(
     db_event.attachments = db_event.attachments.split(",") if db_event.attachments else []
     return db_event
 
+@router.post("/{event_id}/attachments", response_model=Event)
+async def add_event_attachments(
+    event_id: int,
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db)
+):
+    # Fetch the event record; if not found, return 404
+    db_event = db.query(DBEvent).filter(DBEvent.id == event_id).first()
+    if not db_event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Get any existing attachments (assumed stored as a comma-separated string)
+    existing_attachments = db_event.attachments.split(",") if db_event.attachments else []
+    
+    # Process each uploaded file: upload and collect URLs
+    new_attachment_urls = []
+    for file in files:
+        url = upload_file_to_s3(file, db_event.event_name)
+        new_attachment_urls.append(url)
+    
+    # Append new attachments to existing ones
+    all_attachments = existing_attachments + new_attachment_urls
+    db_event.attachments = ",".join(all_attachments)
+    
+    db.commit()
+    db.refresh(db_event)
+    
+    # Return the event with attachments as a list
+    db_event.attachments = db_event.attachments.split(",") if db_event.attachments else []
+    return db_event
+
+
 @router.get("/", response_model=List[Event])
 def get_events(
     offset: int = Query(0, ge=0),
@@ -75,17 +111,27 @@ def update_event_form(
     db_event = db.query(DBEvent).filter(DBEvent.id == event_id).first()
     if not db_event:
         raise HTTPException(status_code=404, detail="Event not found")
-    update_data = event.dict(exclude_unset=True)
+    
+    # Use model_dump() with exclude_unset=True (instead of event.dict())
+    update_data = event.model_dump(exclude_unset=True)
+    
     if "attachments" in update_data and update_data["attachments"] is not None:
         update_data["attachments"] = ",".join(update_data["attachments"])
+    
     for key, value in update_data.items():
-        setattr(db_event, key, value)
+        if key == "website" and value is not None:
+            setattr(db_event, key, str(value))
+        else:
+            setattr(db_event, key, value)
+    
     db.commit()
     db.refresh(db_event)
+    
     if db_event.attachments:
         db_event.attachments = db_event.attachments.split(",")
     else:
         db_event.attachments = []
+        
     return db_event
 
 @router.put("/{event_id}/status", response_model=Event)
@@ -106,33 +152,35 @@ def update_event_status(
         db_event.attachments = []
     return db_event
 
-@router.post("/{event_id}/attachments", response_model=Event)
-async def add_event_attachments(
-    event_id: int,
-    files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db)
-):
-    # Fetch the event record; if not found, return 404
-    db_event = db.query(DBEvent).filter(DBEvent.id == event_id).first()
-    if not db_event:
+@router.get("/events/{event_id}/pdf", response_class=StreamingResponse)
+def get_event_pdf(event_id: int,
+    db: Session = Depends(get_db)):
+    # Retrieve event data from the database (this is just an example; adjust as needed)
+    event_obj = db.query(DBEvent).filter(DBEvent.id == event_id).first()
+    if not event_obj:
         raise HTTPException(status_code=404, detail="Event not found")
     
-    # Get any existing attachments (assumed stored as a comma-separated string)
-    existing_attachments = db_event.attachments.split(",") if db_event.attachments else []
+    # For attachments, assume you have stored a comma-separated string and convert it to a list
+    attachments = event_obj.attachments.split(",") if event_obj.attachments else []
+
+    # Generate the PDF in memory
+    buffer = BytesIO()
+    generate_event_pdf({
+        "event_name": event_obj.event_name,
+        "institute_name": event_obj.institute_name,
+        "event_date": event_obj.event_date,
+        "location": event_obj.location,
+        "website": event_obj.website,
+        "contact_name": event_obj.contact_name,
+        "contact_number": event_obj.contact_number,
+        "email": event_obj.email,
+        "description": event_obj.description,
+        "expected_audience": event_obj.expected_audience,
+        "fees": event_obj.fees,
+        "payment_status": event_obj.payment_status,
+        "travel_accomodation": event_obj.travel_accomodation,
+    }, attachments, buffer)
+    buffer.seek(0)
     
-    # Process each uploaded file: upload and collect URLs
-    new_attachment_urls = []
-    for file in files:
-        url = upload_file_to_s3(file, db_event.event_name)
-        new_attachment_urls.append(url)
-    
-    # Append new attachments to existing ones
-    all_attachments = existing_attachments + new_attachment_urls
-    db_event.attachments = ",".join(all_attachments)
-    
-    db.commit()
-    db.refresh(db_event)
-    
-    # Return the event with attachments as a list
-    db_event.attachments = db_event.attachments.split(",") if db_event.attachments else []
-    return db_event
+    return StreamingResponse(buffer, media_type="application/pdf",
+                             headers={"Content-Disposition": f"inline; filename=event_{event_id}.pdf"})

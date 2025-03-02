@@ -12,3 +12,6 @@ alembic
 boto3
 python-jose
 pytest
+Pillow 
+reportlab 
+requests
