@@ -10,6 +10,8 @@ from app.utils.pdf_generator import generate_event_pdf
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 import csv
+from app.core.security import get_current_user
+from app.models.user import User as DBUser
 from io import StringIO, BytesIO
 
 
@@ -83,7 +85,8 @@ async def add_event_attachments(
 def get_events(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user)
 ):
     events = db.query(DBEvent).offset(offset).limit(limit).all()
     for event in events:
@@ -96,7 +99,8 @@ def get_events(
 @router.get("/{event_id}", response_model=Event)
 def get_sinlge_event(
     event_id: int,
-    db: Session = Depends(get_db)):
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user)):
     event = db.query(DBEvent).filter(DBEvent.id == event_id).first()
     if event.attachments:
         event.attachments = event.attachments.split(",")
@@ -108,7 +112,8 @@ def get_sinlge_event(
 def update_event_form(
     event_id: int,
     event: EventUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user)
 ):
     db_event = db.query(DBEvent).filter(DBEvent.id == event_id).first()
     if not db_event:
@@ -140,7 +145,8 @@ def update_event_form(
 def update_event_status(
     event_id: int,
     status_update: EventStatusUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user)
 ):
     db_event = db.query(DBEvent).filter(DBEvent.id == event_id).first()
     if not db_event:
@@ -156,7 +162,8 @@ def update_event_status(
 
 @router.get("/events/{event_id}/pdf", response_class=StreamingResponse)
 def get_event_pdf(event_id: int,
-    db: Session = Depends(get_db)):
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user)):
     # Retrieve event data from the database (this is just an example; adjust as needed)
     event_obj = db.query(DBEvent).filter(DBEvent.id == event_id).first()
     if not event_obj:
@@ -191,7 +198,8 @@ def get_event_pdf(event_id: int,
 def get_events_csv(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user)
 ):
     # Query events from the database with offset and limit.
     events = db.query(DBEvent).offset(offset).limit(limit).all()
@@ -253,7 +261,7 @@ def get_events_csv(
     )
 
 @router.delete("/{event_id}", response_model=dict)
-def delete_event(event_id: int, db: Session = Depends(get_db)):
+def delete_event(event_id: int, db: Session = Depends(get_db),current_user: DBUser = Depends(get_current_user)):
     db_event = db.query(DBEvent).filter(DBEvent.id == event_id).first()
     if not db_event:
         raise HTTPException(status_code=404, detail="Event not found")

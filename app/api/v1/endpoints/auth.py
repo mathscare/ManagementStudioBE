@@ -7,6 +7,10 @@ from app.db.session import get_db
 from app.models.user import User as DBUser
 from app.schemas.auth import Token
 from app.schemas.user import UserCreate, UserResponse
+from app.core.config import SECRET_KEY, ALGORITHM
+from jose import jwt, JWTError
+
+
 
 router = APIRouter()
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -33,3 +37,26 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/refresh/")
+def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+        user = db.query(DBUser).filter(DBUser.username == username).first()
+        if user is None:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        # Create a new access token
+        new_access_token = create_access_token(
+            data={"sub": user.username},
+            expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        )
+
+        return {"access_token": new_access_token, "token_type": "bearer"}
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
