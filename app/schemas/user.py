@@ -4,7 +4,7 @@ from typing import Optional
 class UserResponse(BaseModel):
     username: str
     email: EmailStr
-    role: str = "user"
+    role: Optional[str] = "user"
 
     class Config:
         from_attributes = True
@@ -13,7 +13,7 @@ class UserCreate(BaseModel):
     username: str
     email: EmailStr
     password: str
-    role: str = "user"
+    role: Optional[str] = "user"
 
 class RoleUpdate(BaseModel):
     role: str 

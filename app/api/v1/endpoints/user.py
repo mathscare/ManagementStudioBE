@@ -13,7 +13,7 @@ from typing import List
 router = APIRouter()
 
 @router.get("/", response_model=List[UserResponse])
-def get_events(
+def get_users(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1),
     db: Session = Depends(get_db),
