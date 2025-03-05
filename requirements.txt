@@ -15,3 +15,5 @@ pytest
 Pillow 
 reportlab 
 requests
+pydantic[email]
+email-validator

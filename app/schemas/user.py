@@ -1,13 +1,19 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
+from typing import Optional
 
 class UserResponse(BaseModel):
     username: str
-    email: str
+    email: EmailStr
+    role: Optional[str] = "user"
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserCreate(BaseModel):
     username: str
-    email: str
+    email: EmailStr
     password: str
+    role: Optional[str] = "user"
+
+class RoleUpdate(BaseModel):
+    role: str 

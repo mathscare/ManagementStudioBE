@@ -20,8 +20,13 @@ def signup(user: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(DBUser).filter(DBUser.username == user.username).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
+    existing_email = db.query(DBUser).filter(DBUser.email == user.email).first()
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    if user.role:
+        raise HTTPException(status_code=400, detail=user.role)
     hashed_password = pwd_context.hash(user.password)
-    new_user = DBUser(username=user.username, email=user.email, hashed_password=hashed_password)
+    new_user = DBUser(username=user.username, email=user.email, hashed_password=hashed_password,role = user.role)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)

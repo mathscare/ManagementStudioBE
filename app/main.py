@@ -9,13 +9,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Allow all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows requests from any origin
-    allow_credentials=True,  # Allows cookies and authentication headers
-    allow_methods=["*"],  # Allows all HTTP methods (GET, POST, PUT, DELETE, etc.)
-    allow_headers=["*"],  # Allows all headers (Authorization, Content-Type, etc.)
+    allow_origins=["*"],  
+    allow_credentials=True,  
+    allow_methods=["*"],
+    allow_headers=["*"], 
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
