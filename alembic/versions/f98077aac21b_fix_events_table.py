@@ -1,8 +1,8 @@
-"""Add default role to users
+"""Fix events table
 
-Revision ID: e0c393f95f6f
+Revision ID: f98077aac21b
 Revises: 0e60b77002a2
-Create Date: 2025-03-05 16:42:05.153994
+Create Date: 2025-03-05 17:23:39.021305
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'e0c393f95f6f'
+revision: str = 'f98077aac21b'
 down_revision: Union[str, None] = '0e60b77002a2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
