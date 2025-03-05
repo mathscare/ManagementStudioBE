@@ -4,6 +4,10 @@ from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from app.core.config import SECRET_KEY, ALGORITHM
+from app.db.session import get_db
+from sqlalchemy.orm import Session
+
+
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login/")
@@ -17,7 +21,7 @@ def create_access_token(data: dict, expires_delta: timedelta):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
+def get_current_user(token: str = Depends(oauth2_scheme),db: Session = Depends(get_db)):
     from app.db.session import SessionLocal
     from app.models.user import User as DBUser
     try:
@@ -30,8 +34,9 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
                 headers={"WWW-Authenticate": "Bearer"},
             )
         # For demonstration, we return a dummy user.
-        # In a real application, query your database to retrieve the user.
-        return DBUser(username=username, email=f"{username}@example.com", hashed_password="dummy")
+        user = db.query(DBUser).filter(DBUser.username == username).first()
+        return user
+
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
