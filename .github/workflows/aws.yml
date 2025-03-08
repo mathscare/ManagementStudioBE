@@ -34,6 +34,7 @@ jobs:
           echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
           echo "AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}" >> $GITHUB_ENV
           echo "Google_maps_key=${{ secrets.Google_maps_key }}" >> $GITHUB_ENV
+          echo "FILE_AWS_S3_BUCKET=${{ secrets.FILE_AWS_S3_BUCKET }}" >> $GITHUB_ENV
 
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@master

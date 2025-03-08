@@ -23,3 +23,4 @@ def upload_file_to_s3(file: UploadFile, event_name: str) -> str:
         key,
     )
     return f"https://{BUCKET_NAME}.s3.amazonaws.com/{key}"
+ 
