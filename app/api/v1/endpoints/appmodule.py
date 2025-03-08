@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.core.security import get_current_user
 from app.models.user import User as DBUser
 from app.core.config import FILE_AWS_S3_BUCKET
+from datetime import timezone
 
 router = APIRouter()
 
@@ -27,7 +28,7 @@ async def upload_file(
     db: Session = Depends(get_db),
     user: DBUser = Depends(get_current_user)
 ):
-    raise HTTPException(status_code=500, detail=f"S3 upload failed:")
+
     file_uuid = str(uuid.uuid4())
     s3_key = f"uploads/{file_uuid}_{file.filename}"
 
@@ -79,7 +80,7 @@ def download_file(
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     file_age = now - db_file.created_at
 
     # For files uploaded within 2 days, simply return the presigned URL.
