@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(
     title="MathscareDashbaordBE",
     description="Backend Docs For The Dashboard",
-    version="1.1.0",
+    version="1.2.0",
 )
 
 app.add_middleware(
