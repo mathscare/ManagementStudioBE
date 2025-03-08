@@ -7,7 +7,7 @@ class TagOut(BaseModel):
     name: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class FileOut(BaseModel):
     id: int
@@ -16,7 +16,7 @@ class FileOut(BaseModel):
     tags: List[TagOut]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class FileUploadResponse(BaseModel):
     id: int
