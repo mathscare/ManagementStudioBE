@@ -27,7 +27,7 @@ async def upload_file(
     db: Session = Depends(get_db),
     user: DBUser = Depends(get_current_user)
 ):
-
+    raise HTTPException(status_code=500, detail=f"S3 upload failed:")
     file_uuid = str(uuid.uuid4())
     s3_key = f"uploads/{file_uuid}_{file.filename}"
 
