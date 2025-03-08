@@ -46,7 +46,12 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         data={"sub": user.username},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    return {"access_token": access_token, "token_type": "bearer","role": user.role}
+
+    refresh_token = create_access_token(
+        data={"sub": user.username},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES*336)
+    )
+    return {"access_token": access_token, "token_type": "bearer","role": user.role,"refresh_token":refresh_token}
 
 
 @router.post("/refresh/")
@@ -61,7 +66,6 @@ def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
 
-        # Create a new access token
         new_access_token = create_access_token(
             data={"sub": user.username},
             expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)

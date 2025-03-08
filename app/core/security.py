@@ -32,7 +32,6 @@ def get_current_user(token: str = Depends(oauth2_scheme),db: Session = Depends(g
                 detail="Invalid token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        # For demonstration, we return a dummy user.
         user = db.query(DBUser).filter(DBUser.username == username).first()
         return user
 
