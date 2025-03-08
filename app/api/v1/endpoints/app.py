@@ -10,7 +10,7 @@ from app.models.app import File as FileModel, Tag
 from app.schemas.app import FileOut, FileUploadResponse
 from app.db.session import get_db
 from app.core.security import get_current_user
-from app.core.config import FILE_AWS_S3_BUCKET,aw
+from app.core.config import FILE_AWS_S3_BUCKET
 
 router = APIRouter()
 
