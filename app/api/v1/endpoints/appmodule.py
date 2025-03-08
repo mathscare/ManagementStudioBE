@@ -9,6 +9,7 @@ from app.models.app import File as FileModel, Tag
 from app.schemas.app import FileOut, FileUploadResponse
 from app.db.session import get_db
 from app.core.security import get_current_user
+from app.models.user import User as DBUser
 from app.core.config import FILE_AWS_S3_BUCKET
 
 router = APIRouter()
@@ -22,12 +23,10 @@ s3_client = boto3.client("s3", region_name=AWS_REGION)
 @router.post("/upload", response_model=FileUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
-    tags: str = Form(...),  # e.g. "tag1, tag2, tag3"
+    tags: str = Form(...),
     db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user)
+    user: DBUser = Depends(get_current_user)
 ):
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Not authorized to upload files")
 
     file_uuid = str(uuid.uuid4())
     s3_key = f"uploads/{file_uuid}_{file.filename}"
@@ -73,10 +72,8 @@ def is_restored(head_object: dict) -> bool:
 def download_file(
     file_id: int,
     db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user)  # Assume your role-check here
+    user: DBUser = Depends(get_current_user)  # Assume your role-check here
 ):
-    if user.get("role") != "manager":
-        raise HTTPException(status_code=403, detail="Not authorized to download files")
     
     db_file = db.query(FileModel).filter(FileModel.id == file_id).first()
     if not db_file:
@@ -133,11 +130,8 @@ def update_file_tags(
     file_id: int,
     tags: list[str] = Body(..., embed=True),
     db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user)
+    user: DBUser = Depends(get_current_user)
 ):
-    # Only managers can update tags
-    if user.get("role") != "manager":
-        raise HTTPException(status_code=403, detail="Not authorized to update tags")
     
     db_file = db.query(FileModel).filter(FileModel.id == file_id).first()
     if not db_file:
@@ -165,7 +159,8 @@ def update_file_tags(
 def search_files(
     tags: List[str] = Query(...),  # /files/search?tags=tag1&tags=tag2...
     require_all: bool = Query(False),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: DBUser = Depends(get_current_user)
 ):
     if not require_all:
         files = (
