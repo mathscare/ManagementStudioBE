@@ -1,6 +1,8 @@
 # schemas.py
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List
+from datetime import datetime
+
 
 class TagOut(BaseModel):
     id: int
@@ -13,10 +15,11 @@ class FileOut(BaseModel):
     id: int
     file_name: str
     s3_key: str
+    created_at: datetime 
     tags: List[TagOut]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class FileUploadResponse(BaseModel):
     id: int

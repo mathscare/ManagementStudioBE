@@ -80,8 +80,8 @@ def download_file(
 ):
     
     db_file = db.query(FileModel).filter(FileModel.id == file_id).first()
-    if db_file:
-        raise HTTPException(status_code=404, detail=f"File not found {db_file.created_at}")
+    if not db_file:
+        raise HTTPException(status_code=404, detail="File not found")
 
     now = datetime.now(timezone.utc)
     file_age = now - db_file.created_at
