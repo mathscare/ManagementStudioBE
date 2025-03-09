@@ -6,12 +6,15 @@ import asyncio
 from datetime import datetime, timedelta
 import uuid
 from app.models.app import File as FileModel, Tag
-from app.schemas.app import FileOut, FileUploadResponse
+from app.schemas.app import FileOut, FileUploadResponse,TagOut
 from app.db.session import get_db
 from app.core.security import get_current_user
+from sqlalchemy import func
 from app.models.user import User as DBUser
 from app.core.config import FILE_AWS_S3_BUCKET
 from datetime import timezone
+from rapidfuzz import fuzz  # Make sure to install via `pip install rapidfuzz`
+
 
 router = APIRouter()
 
@@ -183,3 +186,33 @@ def search_files(
             .all()
         )
         return files
+    
+
+@router.get("/tags/suggestions", response_model=List[TagOut])
+def tag_suggestions(
+    query: str = Query(..., min_length=1, description="Partial tag name to search for"),
+    offset: int = Query(0, ge=0, description="Number of items to skip"),
+    limit: int = Query(10, ge=1, description="Max number of items to return"),
+    db: Session = Depends(get_db),
+    user: DBUser = Depends(get_current_user)
+):
+    all_tags = db.query(Tag).all()
+    
+    # Use substring matching for very short queries (less than 3 characters)
+    if len(query) < 3:
+        matched_tags = [(tag, 100) for tag in all_tags if query.lower() in tag.name.lower()]
+    else:
+        similarity_threshold = 60  # Adjust this threshold as needed
+        matched_tags = [
+            (tag, fuzz.ratio(tag.name.lower(), query.lower()))
+            for tag in all_tags
+        ]
+        matched_tags = [(tag, score) for tag, score in matched_tags if score >= similarity_threshold]
+    
+    # Sort the tags by descending matching score
+    matched_tags.sort(key=lambda x: x[1], reverse=True)
+    
+    # Apply pagination
+    paginated_tags = matched_tags[offset:offset + limit]
+    
+    return [tag for tag, score in paginated_tags]

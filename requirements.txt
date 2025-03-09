@@ -17,3 +17,4 @@ reportlab
 requests
 pydantic[email]
 email-validator
+rapidfuzz
