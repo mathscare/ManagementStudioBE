@@ -156,6 +156,16 @@ def update_file_tags(
     db.commit()
     return {"message": "Tags updated successfully."}
 
+    
+@router.get("/files/all", response_model=List[FileOut])
+def get_all_files(
+    offset: int = Query(0, ge=0, description="Number of items to skip"),
+    limit: int = Query(10, ge=1, description="Max number of items to return"),
+    db: Session = Depends(get_db),
+    user: DBUser = Depends(get_current_user)
+):
+    files = db.query(FileModel).offset(offset).limit(limit).all()
+    return files
 
 
 # Endpoint to search files by tags (same as before).
