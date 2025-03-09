@@ -226,3 +226,26 @@ def tag_suggestions(
     paginated_tags = matched_tags[offset:offset + limit]
     
     return [tag for tag, score in paginated_tags]
+
+@router.delete("/files/{file_id}")
+def delete_file(
+    file_id: int,
+    db: Session = Depends(get_db),
+    user: DBUser = Depends(get_current_user)
+):
+    # Query the file record from the database.
+    db_file = db.query(FileModel).filter(FileModel.id == file_id).first()
+    if not db_file:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Delete the file from the S3 bucket.
+    try:
+        s3_client.delete_object(Bucket=AWS_BUCKET, Key=db_file.s3_key)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete file from S3: {str(e)}")
+    
+    # Delete the file record from the database.
+    db.delete(db_file)
+    db.commit()
+    
+    return {"message": "File deleted successfully."}
