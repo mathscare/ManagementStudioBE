@@ -26,6 +26,7 @@ class Tenant(Base):
     roles = relationship("Role", back_populates="tenant")
     files = relationship("File", back_populates="tenant")
     tags = relationship("Tag", back_populates="tenant")
+    # Tasks relationship is defined with backref in the Task model
 
 class Role(Base):
     __tablename__ = "roles"
@@ -41,6 +42,7 @@ class Role(Base):
     tenant = relationship("Tenant", back_populates="roles")
     users = relationship("User", back_populates="role_obj")
     permissions = relationship("Permission", secondary=role_permissions, back_populates="roles")
+    # Task role assignees relationship is defined with backref in the Task model
 
 class Permission(Base):
     __tablename__ = "permissions"

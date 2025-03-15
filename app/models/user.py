@@ -16,3 +16,4 @@ class User(Base):
     # Relationships
     tenant = relationship("Tenant", back_populates="users")
     role_obj = relationship("Role", back_populates="users") 
+    # Task relationships are defined with backref in the Task model
