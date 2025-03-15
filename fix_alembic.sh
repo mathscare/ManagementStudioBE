@@ -1,3 +1,14 @@
+#!/bin/bash
+
+# Script to update the Alembic env.py file and run migrations
+
+echo "Updating Alembic configuration and running migrations..."
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Update the Alembic env.py file
+cat > alembic/env.py << 'EOF'
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
@@ -62,3 +73,22 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
+EOF
+
+# Create a new Alembic migration
+echo -e "\nCreating a new Alembic migration..."
+alembic revision --autogenerate -m "Update schema with all models"
+
+# Apply the migration
+echo -e "\nApplying the migration..."
+alembic upgrade head
+
+# Check the database schema
+echo -e "\nChecking database schema for users table:"
+psql postgresql://masteradmin:fastapidb@fastapi-db.c9c8eg0agu7x.ap-south-1.rds.amazonaws.com:5432/fastapi_db -c "\d users"
+
+# Restart Gunicorn
+echo -e "\nRestarting Gunicorn..."
+sudo systemctl restart gunicorn
+
+echo "Fix completed!" 
