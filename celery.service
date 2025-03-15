@@ -1,0 +1,13 @@
+[Unit]
+Description=Celery Worker Service
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/fastapi-backend
+Environment="PATH=/home/ubuntu/fastapi-backend/venv/bin"
+ExecStart=/home/ubuntu/fastapi-backend/venv/bin/python celery_worker.py
+
+[Install]
+WantedBy=multi-user.target 

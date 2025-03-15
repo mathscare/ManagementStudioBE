@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from app.api.v1.endpoints import appmodule as app_endpoint, auth, user, events, tenant, tasks
 from fastapi.middleware.cors import CORSMiddleware
 
-
 app = FastAPI(
     title="MathscareDashbaordBE",
     description="Backend Docs For The Dashboard",

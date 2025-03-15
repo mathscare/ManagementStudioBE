@@ -18,3 +18,5 @@ requests
 pydantic[email]
 email-validator
 rapidfuzz
+celery
+redis
