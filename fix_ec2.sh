@@ -7,7 +7,7 @@ echo "Fixing model loading issue..."
 # Activate virtual environment
 source venv/bin/activate
 
-# Update the models/__init__.py file
+# Update the models/__init__.py file with the correct class name (SubTask not Subtask)
 cat > app/models/__init__.py << 'EOF'
 # Import models in the correct order to avoid circular dependencies
 from app.models.tenant import Tenant, Role, Permission
@@ -20,11 +20,13 @@ from app.models.task import Task, TaskStep, SubTask, TaskStatus, RecurrenceType
 # before SQLAlchemy tries to create the tables
 EOF
 
-# Update the main.py file
-sed -i '1s/^/from fastapi import FastAPI\n# Import models to ensure they are loaded before creating the app\nimport app.models\n/' app/main.py
-sed -i '1d' app/main.py
+# Update the main.py file to import models first
+if ! grep -q "import app.models" app/main.py; then
+    sed -i '1s/^/from fastapi import FastAPI\n# Import models to ensure they are loaded before creating the app\nimport app.models\n/' app/main.py
+    sed -i '1d' app/main.py
+fi
 
-# Create the migration script
+# Create a simple migration script
 cat > run_migration.py << 'EOF'
 #!/usr/bin/env python
 """
@@ -60,13 +62,21 @@ chmod +x run_migration.py
 # Run the migration
 python run_migration.py
 
-# Check if gunicorn service exists
+# Find the service name for the FastAPI application
+SERVICE_NAME=""
 if systemctl list-unit-files | grep -q gunicorn.service; then
-    # Restart the application
-    sudo systemctl restart gunicorn
-    echo "Gunicorn service restarted."
+    SERVICE_NAME="gunicorn.service"
+elif systemctl list-unit-files | grep -q fastapi.service; then
+    SERVICE_NAME="fastapi.service"
+fi
+
+# Restart the application if service exists
+if [ -n "$SERVICE_NAME" ]; then
+    echo "Restarting $SERVICE_NAME..."
+    sudo systemctl restart $SERVICE_NAME
+    echo "Service restarted."
 else
-    echo "Gunicorn service not found. Please check your service configuration."
+    echo "No service found for the FastAPI application. Please restart it manually."
 fi
 
 echo "Fix completed!" 
