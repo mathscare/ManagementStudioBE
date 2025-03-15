@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+# Import models to ensure they are loaded before creating the app
+import app.models
 from app.api.v1.endpoints import appmodule as app_endpoint, auth, user, events, tenant, tasks
 from fastapi.middleware.cors import CORSMiddleware
 
