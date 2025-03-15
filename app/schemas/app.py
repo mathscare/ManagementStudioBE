@@ -1,12 +1,13 @@
 # schemas.py
 from pydantic import BaseModel, ConfigDict
-from typing import List
+from typing import List, Dict
 from datetime import datetime
 
 
 class TagOut(BaseModel):
     id: int
     name: str
+    type: str
 
     class Config:
         from_attributes = True
@@ -25,4 +26,8 @@ class FileUploadResponse(BaseModel):
     id: int
     file_name: str
     s3_key: str
-    tags: List[str]
+    tags: List[TagOut]
+
+# New schema for tag input
+class TagInput(BaseModel):
+    tags: Dict[str, List[str]]

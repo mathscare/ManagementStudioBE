@@ -22,3 +22,4 @@ class Event(Base):
     website = Column(String)
     attachments = Column(Text)
     status = Column(String, default="pending")
+    tenant_id = Column(String, default='defualt', nullable=False) 

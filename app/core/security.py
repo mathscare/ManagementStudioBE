@@ -8,8 +8,6 @@ from app.db.session import get_db
 from sqlalchemy.orm import Session
 from app.models.user import User as DBUser
 
-
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login/")
 
@@ -22,17 +20,32 @@ def create_access_token(data: dict, expires_delta: timedelta):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_current_user(token: str = Depends(oauth2_scheme),db: Session = Depends(get_db)):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        if username is None:
+        tenant_id: int = payload.get("tenant_id")
+        
+        if username is None or tenant_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        user = db.query(DBUser).filter(DBUser.username == username).first()
+            
+        # Get the user from the database
+        user = db.query(DBUser).filter(
+            DBUser.username == username, 
+            DBUser.tenant_id == tenant_id
+        ).first()
+        
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            
         return user
 
     except JWTError:

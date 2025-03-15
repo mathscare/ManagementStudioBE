@@ -18,17 +18,21 @@ class File(Base):
     file_name = Column(String, nullable=False)
     s3_key = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    # New columns for restored URL caching
     restored_url = Column(String, nullable=True)
     restored_url_expiration = Column(DateTime, nullable=True)
-    
-    # Relationship to tags
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), default=1, nullable=False) 
     tags = relationship("Tag", secondary=file_tags, back_populates="files")
+    
+    # Add relationship to tenant
+    tenant = relationship("Tenant", back_populates="files")
 
 class Tag(Base):
     __tablename__ = "tags"
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)
-    
-    # Relationship to files
+    name = Column(String, nullable=False)
+    type = Column(String, default='default', nullable=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), default=1, nullable=False) 
     files = relationship("File", secondary=file_tags, back_populates="tags")
+    
+    # Add relationship to tenant
+    tenant = relationship("Tenant", back_populates="tags")
