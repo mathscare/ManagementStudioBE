@@ -1,5 +1,6 @@
 # app/models/event.py
-from sqlalchemy import Column, Integer, String, Boolean, Date, Float, Text
+from sqlalchemy import Column, Integer, String, Boolean, Date, Float, Text, ForeignKey
+from sqlalchemy.orm import relationship
 from app.db.session import Base
 
 class Event(Base):
@@ -22,4 +23,7 @@ class Event(Base):
     website = Column(String)
     attachments = Column(Text)
     status = Column(String, default="pending")
-    tenant_id = Column(String, default='defualt', nullable=False) 
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, default=1)
+    
+    # Add relationship to tenant
+    tenant = relationship("Tenant", backref="events") 

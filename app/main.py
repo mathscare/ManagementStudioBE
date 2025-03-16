@@ -3,6 +3,8 @@ from fastapi import FastAPI
 import app.models
 from app.api.v1.endpoints import appmodule as app_endpoint, auth, user, events, tenant, tasks
 from fastapi.middleware.cors import CORSMiddleware
+import os
+from typing import List
 
 app = FastAPI(
     title="MathscareDashbaordBE",
@@ -10,9 +12,14 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Get allowed origins from environment variable or use default
+# Format: "http://domain1.com,https://domain2.com,http://localhost:5173"
+origins_str = os.getenv("ALLOWED_ORIGINS", "*")
+origins: List[str] = [origins_str] if origins_str == "*" else origins_str.split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change this in production
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
