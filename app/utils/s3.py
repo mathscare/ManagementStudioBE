@@ -6,12 +6,20 @@ from fastapi import UploadFile
 from app.core.config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET, FILE_AWS_S3_BUCKET
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Tuple
+from botocore.config import Config
+
+# Create a configuration with the correct signature version
+s3_config = Config(
+    signature_version='s3v4',
+    region_name="ap-south-1"
+)
 
 # Initialize S3 client using environment variables
 s3_client = boto3.client(
     "s3",
     aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    config=s3_config
 )
 
 # Initialize async S3 session
@@ -45,7 +53,7 @@ async def upload_file_to_s3(file: UploadFile, event_name: str, bucket: str = Non
     # Use the provided bucket or default to EVENT_BUCKET_NAME
     bucket_name = bucket if bucket else EVENT_BUCKET_NAME
     
-    async with async_session.client("s3") as s3:
+    async with async_session.client("s3", config=s3_config) as s3:
         await s3.upload_fileobj(
             file.file,
             bucket_name,
@@ -62,7 +70,7 @@ async def upload_file_with_tags(file: UploadFile) -> str:
     file_uuid = str(uuid4())
     s3_key = f"uploads/{file_uuid}_{file.filename}"
     
-    async with async_session.client("s3") as s3:
+    async with async_session.client("s3", config=s3_config) as s3:
         await s3.upload_fileobj(
             file.file,
             FILE_BUCKET_NAME,
@@ -76,7 +84,7 @@ async def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) 
     """
     Generate a presigned URL for an S3 object
     """
-    async with async_session.client("s3") as s3:
+    async with async_session.client("s3", config=s3_config) as s3:
         url = await s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": bucket, "Key": key},
@@ -90,7 +98,7 @@ async def head_object(bucket: str, key: str) -> Dict[str, Any]:
     """
     Get metadata for an S3 object
     """
-    async with async_session.client("s3") as s3:
+    async with async_session.client("s3", config=s3_config) as s3:
         try:
             head_obj = await s3.head_object(Bucket=bucket, Key=key)
             return head_obj
@@ -112,7 +120,7 @@ async def restore_object(bucket: str, key: str, days: int = 2, tier: str = "Expe
     """
     Restore an object from Glacier
     """
-    async with async_session.client("s3") as s3:
+    async with async_session.client("s3", config=s3_config) as s3:
         try:
             await s3.restore_object(
                 Bucket=bucket,
@@ -130,7 +138,7 @@ async def delete_object(bucket: str, key: str) -> None:
     """
     Delete an object from S3
     """
-    async with async_session.client("s3") as s3:
+    async with async_session.client("s3", config=s3_config) as s3:
         try:
             await s3.delete_object(Bucket=bucket, Key=key)
         except Exception as e:

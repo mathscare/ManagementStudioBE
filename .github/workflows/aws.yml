@@ -57,3 +57,5 @@ jobs:
             export Google_maps_key=${{ secrets.Google_maps_key }}
             export FILE_AWS_S3_BUCKET=${{ secrets.FILE_AWS_S3_BUCKET }}
             export TASKS_FILE_AWS_S3_BUCKET=${{ secrets.TASKS_FILE_AWS_S3_BUCKET }}
+            alembic upgrade head
+            sudo systemctl restart fastapi
