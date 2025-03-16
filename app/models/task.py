@@ -48,6 +48,9 @@ class Task(Base):
     recurrence_type = Column(Enum(RecurrenceType), default=RecurrenceType.NONE, nullable=False)
     recurrence_config = Column(JSON, nullable=True)  # For storing additional recurrence settings
     
+    # Attachments - stored as comma-separated URLs
+    attachments = Column(Text, nullable=False, default="")
+    
     # Tracking
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -77,6 +80,9 @@ class SubTask(Base):
     description = Column(Text, nullable=True)
     status = Column(Enum(TaskStatus), default=TaskStatus.NOT_STARTED, nullable=False)
     
+    # Attachments - stored as comma-separated URLs
+    attachments = Column(Text, nullable=False, default="")
+    
     # Parent task relationship
     parent_task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
     parent_task = relationship("Task", back_populates="subtasks")
@@ -94,6 +100,9 @@ class TaskStep(Base):
     order = Column(Integer, nullable=False)
     content_type = Column(String, nullable=False)  # "text", "image", "video"
     content = Column(Text, nullable=False)  # Text content or URL to media
+    
+    # Attachments - stored as comma-separated URLs
+    attachments = Column(Text, nullable=False, default="")
     
     # Relationship
     task = relationship("Task", back_populates="steps")

@@ -26,22 +26,33 @@ FILE_BUCKET_NAME = FILE_AWS_S3_BUCKET
 AWS_REGION = "ap-south-1"
 
 # Event file upload
-async def upload_file_to_s3(file: UploadFile, event_name: str) -> str:
+async def upload_file_to_s3(file: UploadFile, event_name: str, bucket: str = None) -> str:
     """
     Upload a file to S3 for events
+    
+    Args:
+        file: The file to upload
+        event_name: Name of the event or prefix for organizing files
+        bucket: Optional bucket name, defaults to EVENT_BUCKET_NAME
+    
+    Returns:
+        URL of the uploaded file
     """
     file_extension = file.filename.split(".")[-1] if "." in file.filename else "dat"
     unique_filename = f"{uuid4()}.{file_extension}"
     key = f"{event_name}/{unique_filename}"  # Organize by event name
     
+    # Use the provided bucket or default to EVENT_BUCKET_NAME
+    bucket_name = bucket if bucket else EVENT_BUCKET_NAME
+    
     async with async_session.client("s3") as s3:
         await s3.upload_fileobj(
             file.file,
-            EVENT_BUCKET_NAME,
+            bucket_name,
             key,
         )
     
-    return f"https://{EVENT_BUCKET_NAME}.s3.amazonaws.com/{key}"
+    return f"https://{bucket_name}.s3.amazonaws.com/{key}"
 
 # File module uploads
 async def upload_file_with_tags(file: UploadFile) -> str:

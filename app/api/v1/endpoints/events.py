@@ -1,17 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional, Dict, Any
 import json
 from app.db.session import get_db
 from app.models.event import Event as DBEvent
 from app.schemas.event import EventCreate, Event, EventUpdate, EventStatusUpdate
-from app.utils.s3 import upload_file_to_s3
+from app.utils.s3 import upload_file_to_s3, delete_object
 from app.utils.pdf_generator import generate_event_pdf
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 from app.core.security import get_current_user
 from app.models.user import User as DBUser
 from app.utils.csv_utils import generate_model_csv
+from app.core.config import AWS_S3_BUCKET
 
 router = APIRouter()
 
@@ -126,8 +127,35 @@ async def update_event_form(
     if not db_event:
         raise HTTPException(status_code=404, detail="Event not found")
     
+    # Check if attachments are being updated
+    if event.attachments is not None:
+        # Get existing attachments
+        existing_attachments = db_event.attachments.split(",") if db_event.attachments else []
+        existing_attachments = [a for a in existing_attachments if a]  # Remove empty strings
+        
+        # Find attachments that are being removed
+        new_attachments = event.attachments
+        removed_attachments = [url for url in existing_attachments if url not in new_attachments]
+        
+        # Delete removed attachments from S3
+        for url in removed_attachments:
+            try:
+                # Extract the S3 key from the URL
+                # URL format: https://bucket-name.s3.amazonaws.com/key
+                s3_key = url.split(".amazonaws.com/")[1]
+                await delete_object(AWS_S3_BUCKET, s3_key)
+            except Exception as e:
+                # Log the error but continue with the update
+                print(f"Error deleting attachment from S3: {str(e)}")
+        
+        # Update the attachments field with comma-separated string
+        event_dict = event.dict(exclude_unset=True)
+        event_dict["attachments"] = ",".join(new_attachments)
+    else:
+        event_dict = event.dict(exclude_unset=True)
+    
     # Update event fields
-    for key, value in event.dict(exclude_unset=True).items():
+    for key, value in event_dict.items():
         setattr(db_event, key, value)
     
     db.commit()
@@ -223,21 +251,47 @@ async def get_events_csv(
         filename="events.csv"
     )
 
+# Helper function to delete attachments from S3
+async def delete_entity_attachments(entity: Any) -> None:
+    """Delete all attachments for an entity from S3."""
+    if not hasattr(entity, 'attachments') or not entity.attachments:
+        return
+    
+    # Get attachments
+    attachments = entity.attachments.split(",") if entity.attachments else []
+    attachments = [a for a in attachments if a]  # Remove empty strings
+    
+    # Delete each attachment from S3
+    for url in attachments:
+        try:
+            # Extract the S3 key from the URL
+            # URL format: https://bucket-name.s3.amazonaws.com/key
+            s3_key = url.split(".amazonaws.com/")[1]
+            await delete_object(AWS_S3_BUCKET, s3_key)
+        except Exception as e:
+            # Log the error but continue with the deletion
+            print(f"Error deleting attachment from S3: {str(e)}")
+
 @router.delete("/{event_id}", response_model=dict)
 async def delete_event(
     event_id: int,
     db: Session = Depends(get_db),
     current_user: DBUser = Depends(get_current_user)
 ):
-    db_event = db.query(DBEvent).filter(
+    # Check if event exists and belongs to user's tenant
+    event = db.query(DBEvent).filter(
         DBEvent.id == event_id,
         DBEvent.tenant_id == current_user.tenant_id
     ).first()
     
-    if not db_event:
+    if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     
-    db.delete(db_event)
+    # Delete attachments from S3
+    await delete_entity_attachments(event)
+    
+    # Delete the event
+    db.delete(event)
     db.commit()
     
     return {"message": "Event deleted successfully"}

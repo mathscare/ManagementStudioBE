@@ -27,6 +27,7 @@ class TaskStepBase(BaseModel):
     order: int
     content_type: ContentType
     content: str
+    attachments: Optional[List[str]] = []
 
 class TaskStepCreate(TaskStepBase):
     pass
@@ -44,6 +45,7 @@ class SubTaskBase(BaseModel):
     title: str
     description: Optional[str] = None
     status: TaskStatus = TaskStatus.NOT_STARTED
+    attachments: Optional[List[str]] = []
 
 class SubTaskCreate(SubTaskBase):
     pass
@@ -65,6 +67,7 @@ class TaskBase(BaseModel):
     due_date: Optional[datetime] = None
     recurrence_type: RecurrenceType = RecurrenceType.NONE
     recurrence_config: Optional[Dict[str, Any]] = None
+    attachments: Optional[List[str]] = []
 
 class TaskCreate(TaskBase):
     user_assignee_ids: Optional[List[int]] = []
@@ -128,6 +131,7 @@ class UpdateTaskStep(BaseModel):
     order: Optional[int] = None
     content_type: Optional[ContentType] = None
     content: Optional[str] = None
+    attachments: Optional[List[str]] = None
 
 # Subtask management
 class AddSubTask(SubTaskCreate):
@@ -136,4 +140,5 @@ class AddSubTask(SubTaskCreate):
 class UpdateSubTask(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    status: Optional[TaskStatus] = None 
+    status: Optional[TaskStatus] = None
+    attachments: Optional[List[str]] = None 

@@ -56,6 +56,7 @@ jobs:
             export AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}
             export Google_maps_key=${{ secrets.Google_maps_key }}
             export FILE_AWS_S3_BUCKET=${{ secrets.FILE_AWS_S3_BUCKET }}
-            alembic revision --autogenerate -m "Update schema with all models"
+            export TASKS_FILE_AWS_S3_BUCKET=${{ secrets.TASKS_FILE_AWS_S3_BUCKET }}
+            alembic revision --autogenerate -m "Add attachments to tasks, subtasks, and steps"
             alembic upgrade head
             sudo systemctl restart fastapi

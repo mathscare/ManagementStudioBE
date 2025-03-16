@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     AWS_S3_BUCKET: str = os.getenv("AWS_S3_BUCKET")
     Google_maps_key : str = os.getenv("Google_maps_key")
     FILE_AWS_S3_BUCKET : str = os.getenv("FILE_AWS_S3_BUCKET")
+    TASKS_FILE_AWS_S3_BUCKET : str = os.getenv("TASKS_FILE_AWS_S3_BUCKET")
 
 
 settings = Settings()
