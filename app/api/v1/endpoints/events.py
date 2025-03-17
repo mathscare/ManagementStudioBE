@@ -153,6 +153,10 @@ async def update_event_form(
         event_dict["attachments"] = ",".join(new_attachments)
     else:
         event_dict = event.dict(exclude_unset=True)
+
+    # Convert custom types (like HttpUrl) to strings before updating
+    if "website" in event_dict and event_dict["website"] is not None:
+        event_dict["website"] = str(event_dict["website"])
     
     # Update event fields
     for key, value in event_dict.items():
