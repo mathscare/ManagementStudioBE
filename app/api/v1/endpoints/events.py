@@ -207,13 +207,17 @@ async def get_event_pdf(
     # Convert attachments string to list
     event.attachments = event.attachments.split(",") if event.attachments else []
     
-    # Generate PDF
-    pdf_bytes = generate_event_pdf(event)
-    buffer = BytesIO(pdf_bytes)
-    buffer.seek(0)
+    # Create an in-memory output buffer
+    output_buffer = BytesIO()
+    
+    # Generate PDF and write to the output buffer
+    generate_event_pdf(event.__dict__, event.attachments, output_buffer)
+    
+    # Retrieve the PDF bytes
+    output_buffer.seek(0)
     
     return StreamingResponse(
-        buffer, 
+        output_buffer, 
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename=event_{event_id}.pdf"}
     )
