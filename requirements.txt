@@ -20,3 +20,4 @@ email-validator
 rapidfuzz
 celery
 redis
+aioboto3
