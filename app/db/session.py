@@ -1,19 +1,15 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-from app.core.config import DATABASE_URL
+from motor.motor_asyncio import AsyncIOMotorClient
+from app.core.config import MONGO_URI, MONGO_DB_NAME
 
-# For SQLite, set connect_args to {"check_same_thread": False}
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-else:
-    engine = create_engine(DATABASE_URL)
+client = AsyncIOMotorClient(MONGO_URI)  # Initialize the MongoDB client globally
+db = client[MONGO_DB_NAME]  # Get the database instance
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+async def ensure_collections_exist():
+    required_collections = ["users", "tenants", "roles", "organizations", "permissions", "files", "tags", "events", "tasks"]
+    existing_collections = await db.list_collection_names()
+    for collection_name in required_collections:
+        if collection_name not in existing_collections:
+            await db.create_collection(collection_name)
 
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    return db

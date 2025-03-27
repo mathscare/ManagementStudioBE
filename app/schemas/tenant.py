@@ -1,8 +1,8 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
+from uuid import UUID
 
-# Permission schemas
 class PermissionBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -11,15 +11,12 @@ class PermissionCreate(PermissionBase):
     pass
 
 class Permission(PermissionBase):
-    id: int
-    
-    model_config = ConfigDict(from_attributes=True)
+    id: UUID
 
-# Role schemas
 class RoleBase(BaseModel):
     name: str
     description: Optional[str] = None
-    tenant_id: int
+    tenant_id: UUID
 
 class RoleCreate(RoleBase):
     pass
@@ -27,17 +24,14 @@ class RoleCreate(RoleBase):
 class RoleUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    permission_ids: Optional[List[int]] = None
+    permission_ids: Optional[List[UUID]] = None
 
 class Role(RoleBase):
-    id: int
+    id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
     permissions: List[Permission] = []
-    
-    model_config = ConfigDict(from_attributes=True)
 
-# Tenant schemas
 class TenantBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -52,13 +46,9 @@ class TenantUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class Tenant(TenantBase):
-    id: int
+    id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
-    model_config = ConfigDict(from_attributes=True)
 
 class TenantWithRoles(Tenant):
     roles: List[Role] = []
-    
-    model_config = ConfigDict(from_attributes=True) 

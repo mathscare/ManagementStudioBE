@@ -1,55 +1,39 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Table, DateTime
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from app.db.session import Base
+from pydantic import BaseModel, Field
+from typing import Optional, List
+from datetime import datetime
+from uuid import UUID
 
-# Association table for many-to-many relationship between roles and permissions
-role_permissions = Table(
-    "role_permissions",
-    Base.metadata,
-    Column("role_id", Integer, ForeignKey("roles.id"), primary_key=True),
-    Column("permission_id", Integer, ForeignKey("permissions.id"), primary_key=True)
-)
+# ----------------------------
+# Tenant Model
+# ----------------------------
+class Tenant(BaseModel):
+    id: UUID = Field(alias="_id")  # Use alias to map _id in the database to id in the model
+    name: str
+    description: Optional[str] = None
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
-class Tenant(Base):
-    __tablename__ = "tenants"
+    class Config:
+        arbitrary_types_allowed = True
+        allow_population_by_field_name = True  # Allow using both id and _id
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)
-    description = Column(String, nullable=True)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Relationships
-    users = relationship("User", back_populates="tenant")
-    roles = relationship("Role", back_populates="tenant")
-    files = relationship("File", back_populates="tenant")
-    tags = relationship("Tag", back_populates="tenant")
-    # Tasks relationship is defined with backref in the Task model
+# ----------------------------
+# Role Model
+# ----------------------------
+class Role(BaseModel):
+    id: Optional[UUID] = Field(default=None, alias="_id")  # Use alias to map _id in the database to id in the model
+    name: str
+    description: Optional[str] = None
+    tenant_id: UUID
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
-class Role(Base):
-    __tablename__ = "roles"
+# ----------------------------
+# Permission Model
+# ----------------------------
+class Permission(BaseModel):
+    id: Optional[UUID] = Field(default=None, alias="_id")  # Use alias to map _id in the database to id in the model
+    name: str
+    description: Optional[str] = None
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    description = Column(String, nullable=True)
-    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Relationships
-    tenant = relationship("Tenant", back_populates="roles")
-    users = relationship("User", back_populates="role_obj")
-    permissions = relationship("Permission", secondary=role_permissions, back_populates="roles")
-    # Task role assignees relationship is defined with backref in the Task model
-
-class Permission(Base):
-    __tablename__ = "permissions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)
-    description = Column(String, nullable=True)
-    
-    # Relationships
-    roles = relationship("Role", secondary=role_permissions, back_populates="permissions") 

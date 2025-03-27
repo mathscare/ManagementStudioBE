@@ -1,29 +1,27 @@
-# app/models/event.py
-from sqlalchemy import Column, Integer, String, Boolean, Date, Float, Text, ForeignKey
-from sqlalchemy.orm import relationship
-from app.db.session import Base
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import date
+from uuid import UUID
 
-class Event(Base):
-    __tablename__ = "events"
+class Event(BaseModel):
+    id: UUID
+    contact_name: str
+    contact_number: str
+    description: Optional[str] = None
+    email: str
+    event_date: Optional[date] = None
+    event_name: str
+    expected_audience: Optional[int] = None
+    fees: Optional[float] = None
+    institute_name: Optional[str] = None
+    is_paid_event: bool = False
+    location: Optional[str] = None
+    payment_status: Optional[str] = None
+    travel_accomodation: Optional[str] = None
+    website: Optional[str] = None
+    attachments: Optional[str] = None
+    status: str = "pending"
+    tenant_id: UUID
 
-    id = Column(Integer, primary_key=True, index=True)
-    contact_name = Column(String, nullable=False)
-    contact_number = Column(String, nullable=False)
-    description = Column(Text)
-    email = Column(String, nullable=False)
-    event_date = Column(Date)
-    event_name = Column(String, nullable=False)
-    expected_audience = Column(Integer)
-    fees = Column(Float)
-    institute_name = Column(String)
-    is_paid_event = Column(Boolean, default=False)
-    location = Column(String)
-    payment_status = Column(String)
-    travel_accomodation = Column(String)
-    website = Column(String)
-    attachments = Column(Text)
-    status = Column(String, default="pending")
-    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, default=1)
-    
-    # Add relationship to tenant
-    tenant = relationship("Tenant", backref="events") 
+    class Config:
+        arbitrary_types_allowed = True

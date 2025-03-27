@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field, HttpUrl, validator
-from typing import List, Optional, Dict, Any, Union
+from pydantic import BaseModel, Field, HttpUrl, BeforeValidator
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
+from uuid import UUID
 
 # Enums
 class RecurrenceType(str, Enum):
@@ -33,13 +34,10 @@ class TaskStepCreate(TaskStepBase):
     pass
 
 class TaskStep(TaskStepBase):
-    id: int
-    task_id: int
+    id: UUID
+    task_id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
-
-    class Config:
-        orm_mode = True
 
 class SubTaskBase(BaseModel):
     title: str
@@ -51,14 +49,11 @@ class SubTaskCreate(SubTaskBase):
     pass
 
 class SubTask(SubTaskBase):
-    id: int
-    parent_task_id: int
+    id: UUID
+    parent_task_id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-
-    class Config:
-        orm_mode = True
 
 class TaskBase(BaseModel):
     title: str
@@ -70,8 +65,8 @@ class TaskBase(BaseModel):
     attachments: Optional[List[str]] = []
 
 class TaskCreate(TaskBase):
-    user_assignee_ids: Optional[List[int]] = []
-    role_assignee_ids: Optional[List[int]] = []
+    user_assignee_ids: Optional[List[UUID]] = []
+    role_assignee_ids: Optional[List[UUID]] = []
     steps: Optional[List[TaskStepCreate]] = []
     subtasks: Optional[List[SubTaskCreate]] = []
 
@@ -82,14 +77,14 @@ class TaskUpdate(BaseModel):
     due_date: Optional[datetime] = None
     recurrence_type: Optional[RecurrenceType] = None
     recurrence_config: Optional[Dict[str, Any]] = None
-    user_assignee_ids: Optional[List[int]] = None
-    role_assignee_ids: Optional[List[int]] = None
+    user_assignee_ids: Optional[List[UUID]] = None
+    role_assignee_ids: Optional[List[UUID]] = None
 
 class TaskStatusUpdate(BaseModel):
     status: TaskStatus
 
 class AssigneeBase(BaseModel):
-    id: int
+    id: UUID
     name: str
 
 class UserAssignee(AssigneeBase):
@@ -99,19 +94,16 @@ class RoleAssignee(AssigneeBase):
     pass
 
 class Task(TaskBase):
-    id: int
+    id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    tenant_id: int
-    created_by: int
+    tenant_id: UUID
+    created_by: UUID
     subtasks: List[SubTask] = []
     steps: List[TaskStep] = []
     user_assignees: List[UserAssignee] = []
     role_assignees: List[RoleAssignee] = []
-
-    class Config:
-        orm_mode = True
 
 # Response models
 class TaskResponse(Task):
@@ -141,4 +133,4 @@ class UpdateSubTask(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[TaskStatus] = None
-    attachments: Optional[List[str]] = None 
+    attachments: Optional[List[str]] = None

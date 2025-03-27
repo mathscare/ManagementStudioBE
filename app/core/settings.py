@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     Google_maps_key : str = os.getenv("Google_maps_key")
     FILE_AWS_S3_BUCKET : str = os.getenv("FILE_AWS_S3_BUCKET")
     TASKS_FILE_AWS_S3_BUCKET : str = os.getenv("TASKS_FILE_AWS_S3_BUCKET")
+    MONGO_URI : str = os.getenv("MONGO_URI")
+    MONGO_DB_NAME : str = os.getenv("MONGO_DB_NAME")
 
 
 settings = Settings()

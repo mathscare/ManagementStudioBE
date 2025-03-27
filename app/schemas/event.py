@@ -1,7 +1,7 @@
-# app/schemas/event.py
 from datetime import date
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, Field
 from typing import List, Optional
+from uuid import UUID
 
 class EventBase(BaseModel):
     contact_name: str
@@ -21,30 +21,10 @@ class EventBase(BaseModel):
     attachments: Optional[List[str]] = None
     status: Optional[str] = None
 
-
-
-class EventCreate(BaseModel):
-    travel_accomodation: str
-    contact_number: str
-    contact_name: str
-    payment_status: str
-    expected_audience: int
-    fees: float
-    event_name: str
-    attachments: List[str] = []
-    status: str
-    event_date: date         # Change from str to date
-    institute_name: str
-    location: str
-    website: Optional[HttpUrl] = None
-    is_paid_event: bool
-    email: str
-    description: str
-
-
+class EventCreate(EventBase):
+    pass
 
 class EventUpdate(BaseModel):
-    # For updating form details (status not included)
     contact_name: Optional[str] = None
     contact_number: Optional[str] = None
     description: Optional[str] = None
@@ -65,7 +45,4 @@ class EventStatusUpdate(BaseModel):
     status: str
 
 class Event(EventBase):
-    id: int
-
-    class Config:
-        from_attributes = True
+    id: UUID

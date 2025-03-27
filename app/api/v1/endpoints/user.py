@@ -1,162 +1,82 @@
-from fastapi import APIRouter, Depends, Query, HTTPException, Path
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List
-from app.schemas.user import UserResponse, UserWithDetails, RoleUpdate, UserRoleUpdate
+from app.db.repository.users import UsersRepository
+from app.db.repository.tenants import TenantsRepository
+from app.db.repository.roles import RolesRepository
+from app.schemas.user import UserResponse, UserWithDetails, UserRoleUpdate
 from app.core.security import get_current_user
-from app.models.user import User as DBUser
-from app.models.tenant import Role, Tenant
-from app.db.session import get_db
 
 router = APIRouter()
 
+users_repo = UsersRepository()
+tenants_repo = TenantsRepository()
+roles_repo = RolesRepository()
+
 @router.get("/", response_model=List[UserResponse])
-def get_users(
-    offset: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def get_users(
+    offset: int = 0,
+    limit: int = Query(default=10, le=20),  # Set max limit to 20
+    current_user: dict = Depends(get_current_user)
 ):
-    """
-    Get all users in the current tenant
-    """
-    users = db.query(DBUser).filter(DBUser.tenant_id == current_user.tenant_id).offset(offset).limit(limit).all()
-    return users
-
-@router.get("/with-details", response_model=List[UserWithDetails])
-def get_users_with_details(
-    offset: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
-):
-    """
-    Get all users in the current tenant with tenant and role details
-    """
-    users = (
-        db.query(DBUser)
-        .filter(DBUser.tenant_id == current_user.tenant_id)
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
-    return users
-
-@router.get("/me", response_model=UserWithDetails)
-def read_users_me(current_user: DBUser = Depends(get_current_user)):
-    """
-    Get current user information with tenant and role details
-    """
-    return current_user
+    tenant_id = current_user.get("tenant_id")
+    users = await users_repo.find_many({"tenant_id": tenant_id}, limit=limit, skip=offset)
+    
+    return [
+        UserResponse(
+            _id=user["_id"] if "_id" in user else user.get("id"),
+            username=user["username"],
+            email=user["email"],
+            role="admin" if user.get("role_id") else "user"
+        ) for user in users
+    ]
 
 @router.get("/{user_id}", response_model=UserWithDetails)
-def get_user(
-    user_id: int = Path(..., gt=0),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
-):
-    """
-    Get a specific user by ID
-    """
-    # Only allow users from the same tenant or admins
-    user = db.query(DBUser).filter(DBUser.id == user_id).first()
+async def get_user(user_id: str, current_user: dict = Depends(get_current_user)):
+    user = await users_repo.find_one({"_id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    if user.tenant_id != current_user.tenant_id and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    role = await roles_repo.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
     
-    return user
+    return UserWithDetails(
+        _id=user["_id"] if "_id" in user else user.get("id"),
+        username=user["username"],
+        email=user["email"],
+        role=role["name"] if role else "user",
+        tenant_id=user["tenant_id"],
+        role_id=user.get("role_id")
+    )
 
-@router.delete("/{user_id}", response_model=UserResponse)
-def delete_user(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
-):
-    """
-    Delete a user by ID. Only admins can perform this action.
-    """
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can delete users")
-    
-    user = db.query(DBUser).filter(
-        DBUser.id == user_id,
-        DBUser.tenant_id == current_user.tenant_id
-    ).first()
-    
+@router.put("/{user_id}/role", response_model=UserResponse)
+async def update_user_role(user_id: str, role_update: UserRoleUpdate, current_user: dict = Depends(get_current_user)):
+    user = await users_repo.find_one({"_id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    db.delete(user)
-    db.commit()
-    
-    return user
-
-@router.put("/{user_id}/role", response_model=UserWithDetails)
-def update_user_role(
-    user_id: int,
-    role_update: RoleUpdate,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
-):
-    """
-    Update a user's role string (admin, user, etc.)
-    """
-    # Ensure only admins can update roles
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can update roles")
-
-    # Fetch the user to be updated
-    user = db.query(DBUser).filter(
-        DBUser.id == user_id,
-        DBUser.tenant_id == current_user.tenant_id
-    ).first()
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # Update the role
-    user.role = role_update.role
-    db.commit()
-    db.refresh(user)
-
-    return user
-
-@router.put("/{user_id}/assign-role", response_model=UserWithDetails)
-def assign_role_to_user(
-    user_id: int,
-    role_update: UserRoleUpdate,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
-):
-    """
-    Assign a specific role object to a user
-    """
-    # Ensure only admins or tenant admins can assign roles
-    if current_user.role != "admin" and current_user.role != "tenant_admin":
-        raise HTTPException(status_code=403, detail="Not enough permissions")
-
-    # Fetch the user to be updated
-    user = db.query(DBUser).filter(
-        DBUser.id == user_id,
-        DBUser.tenant_id == current_user.tenant_id
-    ).first()
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # Verify the role exists and belongs to the same tenant
-    role = db.query(Role).filter(
-        Role.id == role_update.role_id,
-        Role.tenant_id == current_user.tenant_id
-    ).first()
-    
+    role = await roles_repo.find_one({"_id": str(role_update.role_id)})
     if not role:
-        raise HTTPException(status_code=404, detail="Role not found or not in your tenant")
+        raise HTTPException(status_code=404, detail="Role not found")
+    
+    await users_repo.update_one(
+        {"_id": user_id},
+        {"role_id": str(role_update.role_id)}
+    )
+    
+    updated_user = await users_repo.find_one({"_id": user_id})
+    
+    return UserResponse(
+        _id=updated_user["_id"] if "_id" in updated_user else updated_user.get("id"),
+        username=updated_user["username"],
+        email=updated_user["email"],
+        role=role["name"]
+    )
 
-    # Assign the role to the user
-    user.role_id = role.id
-    db.commit()
-    db.refresh(user)
-
-    return user
+@router.delete("/{user_id}")
+async def delete_user(user_id: str, current_user: dict = Depends(get_current_user)):
+    user = await users_repo.find_one({"_id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    await users_repo.delete_one({"_id": user_id})
+    
+    return {"detail": "User deleted successfully"}

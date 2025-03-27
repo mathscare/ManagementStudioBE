@@ -1,33 +1,31 @@
-# schemas.py
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, Field
 from typing import List, Dict
 from datetime import datetime
-
+from uuid import UUID
 
 class TagOut(BaseModel):
-    id: int
+    id: UUID
     name: str
     type: str
 
     class Config:
-        from_attributes = True
+        populate_by_name = True
 
 class FileOut(BaseModel):
-    id: int
+    id: UUID
     file_name: str
     s3_key: str
-    created_at: datetime 
-    tags: List[TagOut]
+    created_at: datetime
+    tags: List[UUID]
 
-    model_config = ConfigDict(from_attributes=True)
-
+    class Config:
+        populate_by_name = True
 
 class FileUploadResponse(BaseModel):
-    id: int
+    id: UUID
     file_name: str
     s3_key: str
-    tags: List[TagOut]
+    tags: List[UUID]
 
-# New schema for tag input
 class TagInput(BaseModel):
     tags: Dict[str, List[str]]

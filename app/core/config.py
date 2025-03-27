@@ -11,3 +11,6 @@ AWS_ACCESS_KEY_ID = settings.AWS_ACCESS_KEY_ID
 Google_maps_key = settings.Google_maps_key
 FILE_AWS_S3_BUCKET = settings.FILE_AWS_S3_BUCKET
 TASKS_FILE_AWS_S3_BUCKET = settings.TASKS_FILE_AWS_S3_BUCKET
+MONGO_URI = settings.MONGO_URI
+MONGO_DB_NAME = settings.MONGO_DB_NAME
+

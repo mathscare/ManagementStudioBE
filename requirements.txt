@@ -21,3 +21,5 @@ rapidfuzz
 celery
 redis
 aioboto3
+motor
+pymongo

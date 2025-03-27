@@ -1,19 +1,15 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
-from sqlalchemy.orm import relationship
-from app.db.session import Base
+from pydantic import BaseModel, Field, EmailStr
+from typing import Optional
+from uuid import UUID
 
-class User(Base):
-    __tablename__ = "users"
+class User(BaseModel):
+    id: UUID = Field(alias="_id")  # Use alias to map _id in the database to id in the model
+    username: str
+    email: EmailStr
+    hashed_password: str
+    tenant_id: UUID
+    role_id: Optional[UUID] = None
 
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    role = Column(String, default="user", nullable=False)
-    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, default=1)
-    role_id = Column(Integer, ForeignKey("roles.id"), nullable=True)
-    
-    # Relationships
-    tenant = relationship("Tenant", back_populates="users")
-    role_obj = relationship("Role", back_populates="users") 
-    # Task relationships are defined with backref in the Task model
+    class Config:
+        arbitrary_types_allowed = True
+        allow_population_by_field_name = True  # Allow using both id and _id

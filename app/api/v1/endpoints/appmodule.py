@@ -1,184 +1,173 @@
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Query, Body
-from sqlalchemy.orm import Session
-from typing import List, Dict
-import asyncio
-from datetime import datetime, timedelta
-import uuid
-import re
-from app.models.app import File as FileModel, Tag
-from app.schemas.app import FileOut, FileUploadResponse, TagOut, TagInput
-from app.db.session import get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, Form
+from typing import List, Dict, Optional
+from app.db.repository.files import FilesRepository
+from app.db.repository.tags import TagsRepository
+from app.schemas.app import FileOut, TagOut, FileUploadResponse, TagInput
 from app.core.security import get_current_user
-from sqlalchemy import func
-from app.models.user import User as DBUser
+from uuid import uuid4
+from datetime import datetime, timedelta
+import json
+from app.utils.s3 import upload_file_to_s3, get_download_url, delete_object
 from app.core.config import FILE_AWS_S3_BUCKET
-from datetime import timezone
+from fastapi.responses import StreamingResponse
+import io
+import csv
 from rapidfuzz import fuzz
-from app.utils.s3 import (
-    upload_file_with_tags,
-    get_download_url,
-    delete_object,
-    is_restored
-)
-from app.utils.csv_utils import generate_model_csv
 
 router = APIRouter()
+files_repo = FilesRepository()
+tags_repo = TagsRepository()
 
-# Constants
-AWS_BUCKET = FILE_AWS_S3_BUCKET
-
-# Endpoint for file upload with tags.
 @router.post("/upload", response_model=FileUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
-    tags: str = Form(...),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    tags: str = Form("{}"),
+    current_user: dict = Depends(get_current_user)
 ):
-    try:
-        # Upload file to S3 using the utility function
-        s3_key = await upload_file_with_tags(file)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"S3 upload failed: {str(e)}")
-
-    # Parse the new tag format: {type1 : [tag1,tag2] } { type2 : [ tag2,tag2] }
-    tag_types = {}
-    # Match pattern like {type : [tag1,tag2]}
-    pattern = r'\{([^:]+):\s*\[(.*?)\]\s*\}'
-    matches = re.findall(pattern, tags)
+    tenant_id = current_user.get("tenant_id")
     
-    for tag_type, tag_list in matches:
-        # Split by comma and handle potential spaces around tags
-        tag_names = [t.strip().strip('"\'') for t in tag_list.split(",") if t.strip()]
-        tag_types[tag_type.strip()] = tag_names
-
-    db_file = FileModel(file_name=file.filename, s3_key=s3_key, tenant_id=current_user.tenant_id)
-
-    for tag_type, tag_names in tag_types.items():
-        for tag_name in tag_names:
-            # Check if tag with same name and type exists
-            tag_obj = db.query(Tag).filter(
-                Tag.name == tag_name,
-                Tag.type == tag_type,
-                Tag.tenant_id == current_user.tenant_id
-            ).first()
+    # Parse tags from form data
+    try:
+        tags_data = json.loads(tags)
+    except json.JSONDecodeError:
+        tags_data = {}
+    
+    # Upload file to S3
+    s3_key = f"{tenant_id}/{str(uuid4())}/{file.filename}"
+    s3_url = await upload_file_to_s3(file, s3_key)
+    
+    # Create file record
+    file_id = str(uuid4())
+    file_record = {
+        "_id": file_id,
+        "file_name": file.filename,
+        "s3_key": s3_key,
+        "s3_url": s3_url,
+        "created_at": datetime.now(),
+        "tenant_id": tenant_id,
+        "tags": []
+    }
+    
+    # Process tags
+    for tag_type, tag_list in tags_data.items():
+        for tag_name in tag_list:
+            # Check if tag exists
+            existing_tag = await tags_repo.find_one({
+                "name": tag_name,
+                "type": tag_type,
+                "tenant_id": tenant_id
+            })
             
-            if not tag_obj:
-                tag_obj = Tag(
-                    name=tag_name,
-                    type=tag_type,
-                    tenant_id=current_user.tenant_id
+            if existing_tag:
+                tag_id = existing_tag["_id"]
+                # Update tag with new file reference
+                files = existing_tag.get("files", [])
+                if file_id not in files:
+                    files.append(file_id)
+                await tags_repo.update_one(
+                    {"_id": tag_id},
+                    {"files": files}
                 )
-                db.add(tag_obj)
-                db.commit()
-                db.refresh(tag_obj)
+            else:
+                # Create new tag
+                tag_id = str(uuid4())
+                await tags_repo.insert_one({
+                    "_id": tag_id,
+                    "name": tag_name,
+                    "type": tag_type,
+                    "tenant_id": tenant_id,
+                    "files": [file_id]
+                })
             
-            db_file.tags.append(tag_obj)
-
-    db.add(db_file)
-    db.commit()
-    db.refresh(db_file)
-
-    return FileUploadResponse(
-        id=db_file.id,
-        file_name=db_file.file_name,
-        s3_key=db_file.s3_key,
-        tags=db_file.tags
-    )
+            # Add tag to file record
+            file_record["tags"].append(tag_id)
+    
+    # Save file record
+    await files_repo.insert_one(file_record)
+    
+    return {
+        "id": file_id,
+        "file_name": file.filename,
+        "s3_key": s3_key,
+        "s3_url": s3_url,
+        "tags": file_record["tags"]
+    }
 
 @router.get("/download/{file_id}")
 async def download_file(
-    file_id: int,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user) 
+    file_id: str,
+    current_user: dict = Depends(get_current_user)
 ):
-    # Get the file from the database
-    db_file = db.query(FileModel).filter(FileModel.id == file_id, FileModel.tenant_id == current_user.tenant_id).first()
-    if not db_file:
+    tenant_id = current_user.get("tenant_id")
+    
+    # Get file record from database
+    file = await files_repo.find_one({"_id": file_id, "tenant_id": tenant_id})
+    if not file:
         raise HTTPException(status_code=404, detail="File not found")
-
+    
     # Calculate file age
-    now = datetime.now(timezone.utc)
-    file_age = now - db_file.created_at
+    now = datetime.now()
+    created_at = file.get("created_at", now)
+    file_age = now - created_at
+    
+    # Check if file needs restoration from Glacier
+    s3_key = file["s3_key"]
+    status, url = await get_download_url(FILE_AWS_S3_BUCKET,s3_key, file_age)
+    
+    if status == "ready":
+        # If file is ready for download, update the URL in the database if needed
+        if file_age >= timedelta(days=2) and url != file.get("s3_url"):
+            await files_repo.update_one(
+                {"_id": file_id},
+                {
+                    "restored_url": url,
+                    "restored_url_expiration": datetime.now() + timedelta(days=2)
+                }
+            )
+        return {"status": "ready", "download_url": url}
+    else:
+        # File is being restored
+        return {"status": "pending", "message": url}
 
-    try:
-        # Use the utility function to get the download URL
-        status, result = await get_download_url(AWS_BUCKET, db_file.s3_key, file_age)
-        
-        if status == "ready":
-            # If the file is ready, update the restored URL in the database
-            if file_age >= timedelta(days=2):
-                db_file.restored_url = result
-                db_file.restored_url_expiration = datetime.utcnow() + timedelta(days=2)
-                db.commit()
-            
-            return {"status": "ready", "download_url": result}
-        else:
-            # If the file is pending restoration
-            return {"status": "pending", "message": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.put("/files/{file_id}/tags")
-async def update_file_tags(
-    file_id: int,
-    tag_input: TagInput = Body(...),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+@router.get("/files", response_model=List[FileOut])
+async def get_files(
+    offset: int = 0,
+    limit: int = Query(default=10, le=100),
+    tag_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
 ):
-    db_file = db.query(FileModel).filter(FileModel.id == file_id, FileModel.tenant_id == current_user.tenant_id).first()
-    if not db_file:
-        raise HTTPException(status_code=404, detail="File not found")
+    tenant_id = current_user.get("tenant_id")
+    query = {"tenant_id": tenant_id}
     
-    # Remove current tags (many-to-many relationship)
-    db_file.tags = []
+    if tag_id:
+        # Find files with the specified tag
+        tag = await tags_repo.find_one({"_id": tag_id, "tenant_id": tenant_id})
+        if tag and "files" in tag:
+            query["_id"] = {"$in": tag["files"]}
     
-    # Add new tags based on type
-    for tag_type, tag_names in tag_input.tags.items():
-        for tag_name in tag_names:
-            # Check if tag with same name and type exists
-            tag_obj = db.query(Tag).filter(
-                Tag.name == tag_name,
-                Tag.type == tag_type,
-                Tag.tenant_id == current_user.tenant_id
-            ).first()
-            
-            if not tag_obj:
-                tag_obj = Tag(
-                    name=tag_name,
-                    type=tag_type,
-                    tenant_id=current_user.tenant_id
-                )
-                db.add(tag_obj)
-                db.commit()
-                db.refresh(tag_obj)
-            
-            db_file.tags.append(tag_obj)
-    
-    db.commit()
-    return {"message": "Tags updated successfully."}
-
-@router.get("/files/all", response_model=List[FileOut])
-async def get_all_files(
-    offset: int = Query(0, ge=0, description="Number of items to skip"),
-    limit: int = Query(10, ge=1, description="Max number of items to return"),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
-):
-    files = db.query(FileModel).filter(FileModel.tenant_id == current_user.tenant_id).offset(offset).limit(limit).all()
-    return files
+    files = await files_repo.find_many(query, limit=limit, skip=offset)
+    return [
+        {
+            "id": file["_id"],
+            "file_name": file["file_name"],
+            "s3_key": file["s3_key"],
+            "created_at": file["created_at"],
+            "tags": file.get("tags", [])
+        } for file in files
+    ]
 
 @router.get("/files/search", response_model=List[FileOut])
 async def search_files(
-    tags: List[str] = Query(None),
+    query: str = None,
     tag_types: List[str] = Query(None),
-    type_tag_pairs: str = Query(None, description="Format: type1:tag1,type2:tag2"),
-    require_all: bool = Query(False),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    tag_names: List[str] = Query(None),
+    type_tag_pairs: str = Query(None),
+    require_all: bool = False,
+    offset: int = 0,
+    limit: int = Query(default=10, le=100),
+    current_user: dict = Depends(get_current_user)
 ):
-    # Base query
-    query = db.query(FileModel).filter(FileModel.tenant_id == current_user.tenant_id)
+    tenant_id = current_user.get("tenant_id")
     
     # Handle type-tag pairs if provided
     if type_tag_pairs:
@@ -188,173 +177,366 @@ async def search_files(
         for pair in pairs:
             if ":" in pair:
                 tag_type, tag_name = pair.split(":", 1)
-                type_tag_conditions.append(
-                    db.query(FileModel.id).join(FileModel.tags).filter(
-                        Tag.type == tag_type.strip(),
-                        Tag.name == tag_name.strip(),
-                        Tag.tenant_id == current_user.tenant_id
-                    ).exists().correlate(FileModel)
-                )
+                # Find tags matching the criteria
+                tags = await tags_repo.find_many({
+                    "type": tag_type.strip(),
+                    "name": tag_name.strip(),
+                    "tenant_id": tenant_id
+                })
+                
+                if tags:
+                    # Get file IDs from these tags
+                    file_ids = []
+                    for tag in tags:
+                        file_ids.extend(tag.get("files", []))
+                    
+                    if file_ids:
+                        type_tag_conditions.append({"_id": {"$in": file_ids}})
         
         if type_tag_conditions:
             if require_all:
-                # All conditions must be met
-                for condition in type_tag_conditions:
-                    query = query.filter(condition)
+                # All conditions must be met (intersection of file sets)
+                pipeline = [
+                    {"$match": {"tenant_id": tenant_id}},
+                    {"$match": {"$and": type_tag_conditions}},
+                    {"$skip": offset},
+                    {"$limit": limit}
+                ]
             else:
-                # Any condition can be met
-                from sqlalchemy import or_
-                query = query.filter(or_(*type_tag_conditions))
+                # Any condition can be met (union of file sets)
+                pipeline = [
+                    {"$match": {"tenant_id": tenant_id}},
+                    {"$match": {"$or": type_tag_conditions}},
+                    {"$skip": offset},
+                    {"$limit": limit}
+                ]
+                
+            files = await files_repo.aggregate(pipeline)
+            return [
+                {
+                    "id": file["_id"],
+                    "file_name": file["file_name"],
+                    "s3_key": file["s3_key"],
+                    "created_at": file["created_at"],
+                    "tags": file.get("tags", [])
+                } for file in files
+            ]
     
-    # Legacy tag search (without types)
-    elif tags:
-        query = query.join(FileModel.tags)
-        if not require_all:
-            # Any of the tags
-            query = query.filter(Tag.name.in_(tags), Tag.tenant_id == current_user.tenant_id).distinct()
-        else:
-            # All of the tags
-            subquery = (
-                db.query(FileModel.id)
-                .join(FileModel.tags)
-                .filter(Tag.name.in_(tags), Tag.tenant_id == current_user.tenant_id)
-                .group_by(FileModel.id)
-                .having(func.count(Tag.id) == len(tags))
-            )
-            query = query.filter(FileModel.id.in_(subquery))
+    # Standard query
+    search_query = {"tenant_id": tenant_id}
     
-    # Filter by tag types only
-    elif tag_types:
-        query = query.join(FileModel.tags).filter(
-            Tag.type.in_(tag_types),
-            Tag.tenant_id == current_user.tenant_id
-        ).distinct()
+    # Add filename search if query is provided
+    if query:
+        search_query["file_name"] = {"$regex": query, "$options": "i"}
     
-    return query.all()
+    # Filter by tag types
+    if tag_types:
+        # Find all tags of the given types
+        tags = await tags_repo.find_many({
+            "type": {"$in": tag_types},
+            "tenant_id": tenant_id
+        })
+        
+        if tags:
+            # Get all file IDs from these tags
+            file_ids = []
+            for tag in tags:
+                file_ids.extend(tag.get("files", []))
+            
+            if file_ids:
+                search_query["_id"] = {"$in": file_ids}
+    
+    # Filter by tag names
+    if tag_names:
+        # Find all tags with the given names
+        tags = await tags_repo.find_many({
+            "name": {"$in": tag_names},
+            "tenant_id": tenant_id
+        })
+        
+        if tags:
+            # Get all file IDs from these tags
+            file_ids = []
+            for tag in tags:
+                file_ids.extend(tag.get("files", []))
+            
+            if file_ids:
+                if "_id" in search_query:
+                    # Intersect with existing file IDs
+                    existing_ids = search_query["_id"]["$in"]
+                    file_ids = [id for id in file_ids if id in existing_ids]
+                    search_query["_id"] = {"$in": file_ids}
+                else:
+                    search_query["_id"] = {"$in": file_ids}
+    
+    # Get files matching the criteria
+    files = await files_repo.find_many(search_query, limit=limit, skip=offset)
+    return [
+        {
+            "id": file["_id"],
+            "file_name": file["file_name"],
+            "s3_key": file["s3_key"],
+            "created_at": file["created_at"],
+            "tags": file.get("tags", [])
+        } for file in files
+    ]
 
-@router.get("/tags/suggestions", response_model=List[TagOut])
-async def tag_suggestions(
-    query: str = Query(..., min_length=1, description="Partial tag name to search for"),
-    tag_type: str = Query(None, description="Filter suggestions by tag type"),
-    offset: int = Query(0, ge=0, description="Number of items to skip"),
-    limit: int = Query(10, ge=1, description="Max number of items to return"),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+@router.get("/tags", response_model=List[TagOut])
+async def get_tags(
+    offset: int = 0,
+    limit: int = Query(default=50, le=200),
+    current_user: dict = Depends(get_current_user)
 ):
-    # Base query with tenant filter
-    tag_query = db.query(Tag).filter(Tag.tenant_id == current_user.tenant_id)
-    
-    # Add type filter if provided
-    if tag_type:
-        tag_query = tag_query.filter(Tag.type == tag_type)
-    
-    all_tags = tag_query.all()
-    
-    # Use substring matching for very short queries (less than 3 characters)
-    if len(query) < 3:
-        matched_tags = [(tag, 100) for tag in all_tags if query.lower() in tag.name.lower()]
-    else:
-        similarity_threshold = 60  # Adjust this threshold as needed
-        matched_tags = [
-            (tag, fuzz.ratio(tag.name.lower(), query.lower()))
-            for tag in all_tags
-        ]
-        matched_tags = [(tag, score) for tag, score in matched_tags if score >= similarity_threshold]
-    
-    # Sort the tags by descending matching score
-    matched_tags.sort(key=lambda x: x[1], reverse=True)
-    
-    # Apply pagination
-    paginated_tags = matched_tags[offset:offset + limit]
-    
-    return [tag for tag, score in paginated_tags]
-
-@router.delete("/files/{file_id}")
-async def delete_file(
-    file_id: int,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
-):
-    # Query the file record from the database.
-    db_file = db.query(FileModel).filter(FileModel.id == file_id, FileModel.tenant_id == current_user.tenant_id).first()
-    if not db_file:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Delete the file from the S3 bucket using the utility function
-    try:
-        await delete_object(AWS_BUCKET, db_file.s3_key)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete file from S3: {str(e)}")
-    
-    # Delete the file record from the database.
-    db.delete(db_file)
-    db.commit()
-    
-    return {"message": "File deleted successfully."}
+    tenant_id = current_user.get("tenant_id")
+    tags = await tags_repo.find_many({"tenant_id": tenant_id}, limit=limit, skip=offset)
+    return [
+        {
+            "id": tag["_id"],
+            "name": tag["name"],
+            "type": tag.get("type", "default")
+        } for tag in tags
+    ]
 
 @router.get("/tags/{tag_type}", response_model=List[TagOut])
 async def get_tags_by_type(
     tag_type: str,
-    offset: int = Query(0, ge=0, description="Number of items to skip"),
-    limit: int = Query(100, ge=1, le=500, description="Max number of items to return"),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    offset: int = 0,
+    limit: int = Query(default=50, le=200),
+    current_user: dict = Depends(get_current_user)
 ):
-    """
-    Get tags filtered by a specific type provided in the path
-    """
-    tags = db.query(Tag).filter(
-        Tag.type == tag_type,
-        Tag.tenant_id == current_user.tenant_id
-    ).offset(offset).limit(limit).all()
-    
-    return tags
+    tenant_id = current_user.get("tenant_id")
+    tags = await tags_repo.find_many(
+        {"type": tag_type, "tenant_id": tenant_id}, 
+        limit=limit, 
+        skip=offset
+    )
+    return [
+        {
+            "id": tag["_id"],
+            "name": tag["name"],
+            "type": tag.get("type", "default")
+        } for tag in tags
+    ]
 
 @router.get("/tag_types", response_model=List[str])
 async def get_tag_types(
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
-    """
-    Get all available tag types
-    """
-    # Use distinct to get unique tag types
-    tag_types = db.query(Tag.type).filter(
-        Tag.tenant_id == current_user.tenant_id
-    ).distinct().all()
+    tenant_id = current_user.get("tenant_id")
+    pipeline = [
+        {"$match": {"tenant_id": tenant_id}},
+        {"$group": {"_id": "$type"}},
+        {"$project": {"type": "$_id", "_id": 0}}
+    ]
     
-    # Extract values from result tuples and filter out None values
-    return [tag_type[0] for tag_type in tag_types if tag_type[0] is not None]
+    result = await tags_repo.aggregate(pipeline)
+    return [item.get("type") for item in result if item.get("type")]
+
+@router.get("/tags/suggestions", response_model=List[TagOut])
+async def tag_suggestions(
+    query: str = Query(..., min_length=1),
+    tag_type: str = None,
+    offset: int = 0,
+    limit: int = Query(default=10, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    tenant_id = current_user.get("tenant_id")
+    
+    # Base query
+    find_query = {"tenant_id": tenant_id}
+    
+    # Add type filter if provided
+    if tag_type:
+        find_query["type"] = tag_type
+    
+    # For short queries, use regex
+    if len(query) < 3:
+        find_query["name"] = {"$regex": f".*{query}.*", "$options": "i"}
+        tags = await tags_repo.find_many(find_query, limit=limit, skip=offset)
+        return [
+            {
+                "id": tag["_id"],
+                "name": tag["name"],
+                "type": tag.get("type", "default")
+            } for tag in tags
+        ]
+    
+    # For longer queries, do fuzzy matching
+    all_tags = await tags_repo.find_many(find_query)
+    
+    # Calculate fuzzy matches
+    fuzzy_matches = []
+    for tag in all_tags:
+        score = fuzz.ratio(tag["name"].lower(), query.lower())
+        if score >= 60:  # Threshold for relevance
+            fuzzy_matches.append((tag, score))
+    
+    # Sort by score, highest first
+    fuzzy_matches.sort(key=lambda x: x[1], reverse=True)
+    
+    # Paginate results
+    paginated_matches = fuzzy_matches[offset:offset + limit]
+    
+    return [
+        {
+            "id": tag["_id"],
+            "name": tag["name"],
+            "type": tag.get("type", "default")
+        } for tag, score in paginated_matches
+    ]
+
+@router.put("/files/{file_id}/tags", response_model=FileOut)
+async def update_file_tags(
+    file_id: str,
+    tag_input: TagInput,
+    current_user: dict = Depends(get_current_user)
+):
+    tenant_id = current_user.get("tenant_id")
+    
+    # Find the file
+    file = await files_repo.find_one({"_id": file_id, "tenant_id": tenant_id})
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Get current tag IDs
+    current_tag_ids = file.get("tags", [])
+    
+    # Remove file reference from current tags
+    for tag_id in current_tag_ids:
+        tag = await tags_repo.find_one({"_id": tag_id})
+        if tag and "files" in tag:
+            files = tag["files"]
+            if file_id in files:
+                files.remove(file_id)
+                await tags_repo.update_one({"_id": tag_id}, {"files": files})
+    
+    # Process new tags
+    new_tag_ids = []
+    for tag_type, tag_names in tag_input.tags.items():
+        for tag_name in tag_names:
+            # Check if tag exists
+            existing_tag = await tags_repo.find_one({
+                "name": tag_name,
+                "type": tag_type,
+                "tenant_id": tenant_id
+            })
+            
+            if existing_tag:
+                tag_id = existing_tag["_id"]
+                # Add file reference to tag
+                files = existing_tag.get("files", [])
+                if file_id not in files:
+                    files.append(file_id)
+                    await tags_repo.update_one({"_id": tag_id}, {"files": files})
+            else:
+                # Create new tag
+                tag_id = str(uuid4())
+                await tags_repo.insert_one({
+                    "_id": tag_id,
+                    "name": tag_name,
+                    "type": tag_type,
+                    "tenant_id": tenant_id,
+                    "files": [file_id]
+                })
+            
+            new_tag_ids.append(tag_id)
+    
+    # Update file with new tags
+    await files_repo.update_one({"_id": file_id}, {"tags": new_tag_ids})
+    
+    # Return updated file
+    updated_file = await files_repo.find_one({"_id": file_id})
+    return {
+        "id": updated_file["_id"],
+        "file_name": updated_file["file_name"],
+        "s3_key": updated_file["s3_key"],
+        "created_at": updated_file["created_at"],
+        "tags": updated_file.get("tags", [])
+    }
+
+@router.delete("/files/{file_id}")
+async def delete_file(file_id: str, current_user: dict = Depends(get_current_user)):
+    tenant_id = current_user.get("tenant_id")
+    file = await files_repo.find_one({"_id": file_id, "tenant_id": tenant_id})
+    
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Remove file from all tags
+    for tag_id in file.get("tags", []):
+        tag = await tags_repo.find_one({"_id": tag_id})
+        if tag and "files" in tag and file_id in tag["files"]:
+            updated_files = [f for f in tag["files"] if f != file_id]
+            await tags_repo.update_one({"_id": tag_id}, {"files": updated_files})
+    
+    # Delete file from S3
+    try:
+        await delete_object(file["s3_key"])
+    except Exception as e:
+        # Log error but continue with deletion from database
+        print(f"Error deleting file from S3: {str(e)}")
+    
+    # Delete file record
+    await files_repo.delete_one({"_id": file_id})
+    return {"detail": "File deleted successfully"}
 
 @router.get("/files/export/csv")
 async def export_files_to_csv(
-    tag_type: str = Query(None, description="Filter by tag type"),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    tag_type: str = None,
+    current_user: dict = Depends(get_current_user)
 ):
-    """
-    Export files to CSV, optionally filtered by tag type
-    """
-    # Base query
-    query = db.query(FileModel).filter(FileModel.tenant_id == current_user.tenant_id)
+    tenant_id = current_user.get("tenant_id")
+    query = {"tenant_id": tenant_id}
     
-    # Apply tag type filter if provided
+    # Add tag type filter if provided
     if tag_type:
-        query = query.join(FileModel.tags).filter(Tag.type == tag_type).distinct()
+        # Find all tags of the specified type
+        tags = await tags_repo.find_many({"type": tag_type, "tenant_id": tenant_id})
+        if tags:
+            # Get all file IDs from these tags
+            file_ids = []
+            for tag in tags:
+                file_ids.extend(tag.get("files", []))
+            
+            # Only get files that are in this list
+            if file_ids:
+                query["_id"] = {"$in": file_ids}
+            else:
+                # No files match this tag type
+                query["_id"] = {"$in": []}
     
-    # Get the files
-    files = query.all()
+    # Get files from database
+    files = await files_repo.find_many(query)
     
-    # Define headers and field mapping
-    headers = ["id", "file_name", "s3_key", "created_at", "tags"]
-    field_mapping = {
-        "tags": "tags"  # This will be handled specially
-    }
+    # Create in-memory CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
     
-    # Generate the CSV
-    return await generate_model_csv(
-        models=files,
-        headers=headers,
-        field_mapping=field_mapping,
-        filename="files_export.csv"
+    # Write header row
+    writer.writerow(["ID", "Filename", "S3 Key", "Created At", "Tags"])
+    
+    # Write data rows
+    for file in files:
+        # Get tag names for this file
+        tag_names = []
+        for tag_id in file.get("tags", []):
+            tag = await tags_repo.find_one({"_id": tag_id})
+            if tag:
+                tag_names.append(f"{tag.get('type', 'default')}:{tag.get('name', '')}")
+        
+        # Write the row
+        writer.writerow([
+            file.get("_id", ""),
+            file.get("file_name", ""),
+            file.get("s3_key", ""),
+            file.get("created_at", ""),
+            ", ".join(tag_names)
+        ])
+    
+    # Return CSV as streaming response
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=files_export_{datetime.now().strftime('%Y%m%d')}.csv"}
     )
