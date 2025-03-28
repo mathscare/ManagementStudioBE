@@ -80,3 +80,10 @@ async def delete_user(user_id: str, current_user: dict = Depends(get_current_use
     await users_repo.delete_one({"_id": user_id})
     
     return {"detail": "User deleted successfully"}
+
+@router.get("/me", response_model=UserWithDetails)
+async def read_users_me(current_user: dict = Depends(get_current_user)):
+    """
+    Get current user information with tenant and role details
+    """
+    return current_user
