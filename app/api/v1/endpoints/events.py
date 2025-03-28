@@ -1,223 +1,269 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body, Query
-from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 import json
-from app.db.session import get_db
-from app.models.event import Event as DBEvent
+from datetime import datetime, date
+from uuid import uuid4
+from io import BytesIO
+
+from app.db.repository.events import EventsRepository
 from app.schemas.event import EventCreate, Event, EventUpdate, EventStatusUpdate
-from app.utils.s3 import upload_file_to_s3, delete_object
+from app.utils.s3 import upload_file_to_s3, delete_object, create_s3_bucket
 from app.utils.pdf_generator import generate_event_pdf
 from fastapi.responses import StreamingResponse
-from io import BytesIO
 from app.core.security import get_current_user
-from app.models.user import User as DBUser
 from app.utils.csv_utils import generate_model_csv
-from app.core.config import AWS_S3_BUCKET
+
 
 router = APIRouter()
+events_repo = EventsRepository()
+
+# Helper function to convert fields for MongoDB storage
+def prepare_event_for_storage(event_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert types that MongoDB can't handle natively."""
+    result = dict(event_dict)
+    
+    # Convert date to datetime
+    if "event_date" in result and isinstance(result["event_date"], date):
+        result["event_date"] = datetime.combine(result["event_date"], datetime.min.time())
+    
+    # Convert HttpUrl to string
+    if "website" in result and result["website"] is not None:
+        result["website"] = str(result["website"])
+    
+    return result
 
 @router.post("/", response_model=Event)
 async def create_event(
     event_data: EventCreate = Body(...),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    db_event = DBEvent(
-        contact_name=event_data.contact_name,
-        contact_number=event_data.contact_number,
-        description=event_data.description,
-        email=event_data.email,
-        event_date=event_data.event_date,
-        event_name=event_data.event_name,
-        expected_audience=event_data.expected_audience,
-        fees=event_data.fees,
-        institute_name=event_data.institute_name,
-        is_paid_event=event_data.is_paid_event,
-        location=event_data.location,
-        payment_status=event_data.payment_status,
-        travel_accomodation=event_data.travel_accomodation,
-        website=str(event_data.website) if event_data.website else None,
-        attachments="",
-        status=event_data.status,
-        tenant_id=current_user.tenant_id  
-    )
-    db.add(db_event)
-    db.commit()
-    db.refresh(db_event)
-    db_event.attachments = db_event.attachments.split(",") if db_event.attachments else []
-    return db_event
+    tenant_id = current_user["tenant_id"]
+    
+    # Create event with additional fields
+    event_dict = event_data.dict()
+    event_dict["_id"] = str(uuid4())
+    event_dict["tenant_id"] = tenant_id
+    event_dict["attachments"] = ""
+    event_dict["created_at"] = datetime.utcnow()
+    event_dict["updated_at"] = datetime.utcnow()
+    event_dict["is_active"] = True
+    
+    # Prepare for MongoDB storage
+    event_dict = prepare_event_for_storage(event_dict)
+    
+    # Insert into database
+    await events_repo.insert_one(event_dict)
+    
+    # Get the created event
+    created_event = await events_repo.find_one({"_id": event_dict["_id"]})
+    
+    # Convert for response
+    created_event["attachments"] = created_event["attachments"].split(",") if created_event["attachments"] else []
+    created_event["id"] = created_event.pop("_id")  # Replace _id with id for response
+    
+    return Event(**created_event)
 
 @router.post("/{event_id}/attachments", response_model=Event)
 async def add_event_attachments(
-    event_id: int,
+    event_id: str,
     files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    # Fetch the event record; if not found, return 404
-    db_event = db.query(DBEvent).filter(
-        DBEvent.id == event_id,
-        DBEvent.tenant_id == current_user.tenant_id
-    ).first()
+    tenant_id = current_user["tenant_id"]
     
-    if not db_event:
+    # Find the event
+    event = await events_repo.find_one({"_id": event_id, "tenant_id": tenant_id})
+    if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     
-    # Get any existing attachments (assumed stored as a comma-separated string)
-    existing_attachments = db_event.attachments.split(",") if db_event.attachments else []
+    # Get existing attachments
+    existing_attachments = event["attachments"].split(",") if event["attachments"] else []
+    existing_attachments = [a for a in existing_attachments if a]  # Remove empty strings
     
-    # Process each uploaded file: upload and collect URLs
+    # Define bucket name based on tenant
+    bucket_name = f"AWS_S3_BUCKET_{tenant_id}"    
+    # Upload new files
     new_attachment_urls = []
     for file in files:
-        url = await upload_file_to_s3(file, db_event.event_name)
+        url = await upload_file_to_s3(file, bucket_name)
         new_attachment_urls.append(url)
     
-    # Append new attachments to existing ones
+    # Combine attachments and update
     all_attachments = existing_attachments + new_attachment_urls
-    db_event.attachments = ",".join(all_attachments)
+    updated_attachments = ",".join(all_attachments)
     
-    db.commit()
-    db.refresh(db_event)
+    # Update event with new attachments and updated_at timestamp
+    await events_repo.update_one(
+        {"_id": event_id}, 
+        {
+            "attachments": updated_attachments,
+            "updated_at": datetime.utcnow()
+        }
+    )
     
-    # Return the event with attachments as a list
-    db_event.attachments = db_event.attachments.split(",") if db_event.attachments else []
-    return db_event
+    # Get updated event
+    updated_event = await events_repo.find_one({"_id": event_id})
+    
+    # Format for response
+    updated_event["attachments"] = updated_event["attachments"].split(",") if updated_event["attachments"] else []
+    updated_event["id"] = updated_event.pop("_id")
+    
+    return Event(**updated_event)
 
 @router.get("/", response_model=List[Event])
 async def get_events(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    events = db.query(DBEvent).filter(DBEvent.tenant_id == current_user.tenant_id).offset(offset).limit(limit).all()
+    tenant_id = current_user["tenant_id"]
+    
+    # Use the updated repository method with pagination
+    events = await events_repo.find_many(
+        {"tenant_id": tenant_id},
+        skip=offset,
+        limit=limit
+    )
+    
+    # Format for response
+    formatted_events = []
     for event in events:
-        event.attachments = event.attachments.split(",") if event.attachments else []
-    return events
+        event_dict = dict(event)
+        event_dict["attachments"] = event_dict["attachments"].split(",") if event_dict["attachments"] else []
+        event_dict["id"] = event_dict.pop("_id")
+        formatted_events.append(Event(**event_dict))
+    
+    return formatted_events
 
 @router.get("/{event_id}", response_model=Event)
 async def get_single_event(
-    event_id: int,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    event_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    event = db.query(DBEvent).filter(
-        DBEvent.id == event_id,
-        DBEvent.tenant_id == current_user.tenant_id
-    ).first()
+    tenant_id = current_user["tenant_id"]
     
+    # Find event
+    event = await events_repo.find_one({"_id": event_id, "tenant_id": tenant_id})
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     
-    event.attachments = event.attachments.split(",") if event.attachments else []
-    return event
+    # Format for response
+    event_dict = dict(event)
+    event_dict["attachments"] = event_dict["attachments"].split(",") if event_dict["attachments"] else []
+    event_dict["id"] = event_dict.pop("_id")
+    
+    return Event(**event_dict)
 
 @router.put("/{event_id}/form", response_model=Event)
 async def update_event_form(
-    event_id: int,
+    event_id: str,
     event: EventUpdate,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    db_event = db.query(DBEvent).filter(
-        DBEvent.id == event_id,
-        DBEvent.tenant_id == current_user.tenant_id
-    ).first()
+    tenant_id = current_user["tenant_id"]
     
-    if not db_event:
+    # Find event
+    existing_event = await events_repo.find_one({"_id": event_id, "tenant_id": tenant_id})
+    if not existing_event:
         raise HTTPException(status_code=404, detail="Event not found")
     
-    # Check if attachments are being updated
-    if event.attachments is not None:
+    # Prepare update dict
+    update_dict = event.dict(exclude_unset=True)
+    
+    # Handle attachments specially
+    if "attachments" in update_dict:
         # Get existing attachments
-        existing_attachments = db_event.attachments.split(",") if db_event.attachments else []
-        existing_attachments = [a for a in existing_attachments if a]  # Remove empty strings
+        existing_attachments = existing_event["attachments"].split(",") if existing_event["attachments"] else []
+        existing_attachments = [a for a in existing_attachments if a]
         
-        # Find attachments that are being removed
-        new_attachments = event.attachments
+        # Find attachments to remove
+        new_attachments = update_dict["attachments"]
         removed_attachments = [url for url in existing_attachments if url not in new_attachments]
         
-        # Delete removed attachments from S3
+        # Delete from S3
+        bucket_name = f"AWS_S3_BUCKET_{tenant_id}"
         for url in removed_attachments:
             try:
-                # Extract the S3 key from the URL
-                # URL format: https://bucket-name.s3.amazonaws.com/key
                 s3_key = url.split(".amazonaws.com/")[1]
-                await delete_object(AWS_S3_BUCKET, s3_key)
+                await delete_object(bucket_name, s3_key)
             except Exception as e:
-                # Log the error but continue with the update
                 print(f"Error deleting attachment from S3: {str(e)}")
         
-        # Update the attachments field with comma-separated string
-        event_dict = event.dict(exclude_unset=True)
-        event_dict["attachments"] = ",".join(new_attachments)
-    else:
-        event_dict = event.dict(exclude_unset=True)
-
-    # Convert custom types (like HttpUrl) to strings before updating
-    if "website" in event_dict and event_dict["website"] is not None:
-        event_dict["website"] = str(event_dict["website"])
+        # Update attachments as comma-separated string
+        update_dict["attachments"] = ",".join(new_attachments)
     
-    # Update event fields
-    for key, value in event_dict.items():
-        setattr(db_event, key, value)
+    # Add updated_at timestamp
+    update_dict["updated_at"] = datetime.utcnow()
     
-    db.commit()
-    db.refresh(db_event)
+    # Prepare for MongoDB storage
+    update_dict = prepare_event_for_storage(update_dict)
     
-    # Return the event with attachments as a list
-    db_event.attachments = db_event.attachments.split(",") if db_event.attachments else []
-    return db_event
+    # Update the event
+    await events_repo.update_one({"_id": event_id}, update_dict)
+    
+    # Get updated event
+    updated_event = await events_repo.find_one({"_id": event_id})
+    
+    # Format for response
+    updated_event_dict = dict(updated_event)
+    updated_event_dict["attachments"] = updated_event_dict["attachments"].split(",") if updated_event_dict["attachments"] else []
+    updated_event_dict["id"] = updated_event_dict.pop("_id")
+    
+    return Event(**updated_event_dict)
 
 @router.put("/{event_id}/status", response_model=Event)
 async def update_event_status(
-    event_id: int,
+    event_id: str,
     status_update: EventStatusUpdate,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    db_event = db.query(DBEvent).filter(
-        DBEvent.id == event_id,
-        DBEvent.tenant_id == current_user.tenant_id
-    ).first()
+    tenant_id = current_user["tenant_id"]
     
-    if not db_event:
-        raise HTTPException(status_code=404, detail="Event not found")
-    
-    # Update status
-    db_event.status = status_update.status
-    
-    db.commit()
-    db.refresh(db_event)
-    
-    # Return the event with attachments as a list
-    db_event.attachments = db_event.attachments.split(",") if db_event.attachments else []
-    return db_event
-
-@router.get("/events/{event_id}/pdf", response_class=StreamingResponse)
-async def get_event_pdf(
-    event_id: int,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
-):
-    event = db.query(DBEvent).filter(
-        DBEvent.id == event_id,
-        DBEvent.tenant_id == current_user.tenant_id
-    ).first()
-    
+    # Find event
+    event = await events_repo.find_one({"_id": event_id, "tenant_id": tenant_id})
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     
-    # Convert attachments string to list
-    event.attachments = event.attachments.split(",") if event.attachments else []
+    # Update status and updated_at timestamp
+    update_data = {
+        "status": status_update.status,
+        "updated_at": datetime.utcnow()
+    }
+    await events_repo.update_one({"_id": event_id}, update_data)
     
-    # Create an in-memory output buffer
+    # Get updated event
+    updated_event = await events_repo.find_one({"_id": event_id})
+    
+    # Format for response
+    updated_event_dict = dict(updated_event)
+    updated_event_dict["attachments"] = updated_event_dict["attachments"].split(",") if updated_event_dict["attachments"] else []
+    updated_event_dict["id"] = updated_event_dict.pop("_id")
+    
+    return Event(**updated_event_dict)
+
+@router.get("/events/{event_id}/pdf", response_class=StreamingResponse)
+async def get_event_pdf(
+    event_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    tenant_id = current_user["tenant_id"]
+    
+    # Find event
+    event = await events_repo.find_one({"_id": event_id, "tenant_id": tenant_id})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Process attachments for PDF generation
+    event_dict = dict(event)
+    event_dict["attachments"] = event_dict["attachments"].split(",") if event_dict["attachments"] else []
+    
+    # Create output buffer
     output_buffer = BytesIO()
     
-    # Generate PDF and write to the output buffer
-    generate_event_pdf(event.__dict__, event.attachments, output_buffer)
+    # Generate PDF
+    generate_event_pdf(event_dict, event_dict["attachments"], output_buffer)
     
-    # Retrieve the PDF bytes
+    # Reset buffer position
     output_buffer.seek(0)
     
     return StreamingResponse(
@@ -230,76 +276,84 @@ async def get_event_pdf(
 async def get_events_csv(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    # Get events from database
-    events = db.query(DBEvent).filter(
-        DBEvent.tenant_id == current_user.tenant_id
-    ).offset(offset).limit(limit).all()
+    tenant_id = current_user["tenant_id"]
     
-    # Define headers for CSV
+    # Use the updated repository method with pagination
+    events = await events_repo.find_many(
+        {"tenant_id": tenant_id},
+        skip=offset,
+        limit=limit
+    )
+    
+    # Define CSV headers
     headers = [
         "id", "contact_name", "contact_number", "description", "email",
         "event_date", "event_name", "expected_audience", "fees", "institute_name",
         "is_paid_event", "location", "payment_status", "travel_accomodation",
-        "website", "attachments", "status"
+        "website", "attachments", "status", "created_at", "updated_at", "is_active"
     ]
     
-    # Define field mapping for special handling
+    # Special field handling
     field_mapping = {
-        "attachments": "attachments"  # This will be handled specially
+        "attachments": "attachments",  # This will be handled specially
+        "id": "_id"  # Map MongoDB _id to id for CSV
     }
     
-    # Generate CSV using the utility function
+    # Format events for CSV - no need for pagination as it's already done in the repo
+    formatted_events = []
+    for event in events:
+        event_dict = dict(event)
+        formatted_events.append(event_dict)
+    
+    # Generate CSV
     return await generate_model_csv(
-        models=events,
+        models=formatted_events,
         headers=headers,
         field_mapping=field_mapping,
         filename="events.csv"
     )
 
 # Helper function to delete attachments from S3
-async def delete_entity_attachments(entity: Any) -> None:
+async def delete_entity_attachments(entity: Dict[str, Any], tenant_id: str) -> None:
     """Delete all attachments for an entity from S3."""
-    if not hasattr(entity, 'attachments') or not entity.attachments:
+    if not entity.get("attachments"):
         return
     
     # Get attachments
-    attachments = entity.attachments.split(",") if entity.attachments else []
+    attachments = entity["attachments"].split(",") if entity["attachments"] else []
     attachments = [a for a in attachments if a]  # Remove empty strings
+    
+    # Get bucket name for the tenant
+    bucket_name = f"AWS_S3_BUCKET_{tenant_id}"
     
     # Delete each attachment from S3
     for url in attachments:
         try:
             # Extract the S3 key from the URL
-            # URL format: https://bucket-name.s3.amazonaws.com/key
             s3_key = url.split(".amazonaws.com/")[1]
-            await delete_object(AWS_S3_BUCKET, s3_key)
+            await delete_object(bucket_name, s3_key)
         except Exception as e:
             # Log the error but continue with the deletion
             print(f"Error deleting attachment from S3: {str(e)}")
 
 @router.delete("/{event_id}", response_model=dict)
 async def delete_event(
-    event_id: int,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    event_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    # Check if event exists and belongs to user's tenant
-    event = db.query(DBEvent).filter(
-        DBEvent.id == event_id,
-        DBEvent.tenant_id == current_user.tenant_id
-    ).first()
+    tenant_id = current_user["tenant_id"]
     
+    # Find event
+    event = await events_repo.find_one({"_id": event_id, "tenant_id": tenant_id})
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     
     # Delete attachments from S3
-    await delete_entity_attachments(event)
+    await delete_entity_attachments(event, tenant_id)
     
     # Delete the event
-    db.delete(event)
-    db.commit()
+    await events_repo.delete_one({"_id": event_id})
     
     return {"message": "Event deleted successfully"}

@@ -22,3 +22,12 @@ class TenantsRepository:
 
     async def aggregate(self, pipeline):
         return [doc async for doc in self.collection.aggregate(pipeline)]
+    
+    async def find_many(self, query, limit=10, skip=0, sort=None):
+        cursor = self.collection.find(query)
+        
+        if sort:
+            cursor = cursor.sort(sort)
+        
+        cursor = cursor.skip(skip).limit(limit)
+        return [doc async for doc in cursor]

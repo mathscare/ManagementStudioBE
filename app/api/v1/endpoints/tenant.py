@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from app.db.session import get_db
-from app.models.tenant import Tenant, Role, Permission
+from typing import List, Dict, Any
+from datetime import datetime
+from app.db.repository.tenants import TenantsRepository
+from app.db.repository.roles import RolesRepository
+from app.db.repository.permissions import PermissionsRepository
 from app.schemas.tenant import (
     Tenant as TenantSchema,
     TenantCreate,
@@ -16,278 +17,283 @@ from app.schemas.tenant import (
 )
 from app.core.security import get_current_user
 from app.models.user import User as DBUser
-from sqlalchemy.exc import IntegrityError
+from app.utils.s3 import create_s3_bucket
+
 
 router = APIRouter()
 
+tenants_repo = TenantsRepository()
+roles_repo = RolesRepository()
+permissions_repo = PermissionsRepository()
+
 # Tenant endpoints
 @router.get("/tenants", response_model=List[TenantSchema])
-def get_tenants(
+async def list_tenants(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get all tenants (admin only)
     """
-    if current_user.role != "admin":
+    if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    tenants = db.query(Tenant).offset(skip).limit(limit).all()
-    return tenants
+    tenants = await tenants_repo.find_many({}, skip=skip, limit=limit)
+    transformed_tenants = []
+    for t in tenants:
+        # Transform MongoDB '_id' to 'id' for Pydantic
+        tenant_dict = dict(t)
+        tenant_dict["id"] = tenant_dict.pop("_id")
+        # Ensure created_at exists with a valid datetime
+        if "created_at" not in tenant_dict or tenant_dict["created_at"] is None:
+            tenant_dict["created_at"] = datetime.utcnow()
+        transformed_tenants.append(tenant_dict)
+    
+    return [TenantSchema(**t) for t in transformed_tenants]
 
 @router.get("/tenants/{tenant_id}", response_model=TenantWithRoles)
-def get_tenant(
-    tenant_id: int = Path(..., gt=0),
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def get_tenant(
+    tenant_id: str = Path(..., title="Tenant ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get a specific tenant by ID (admin only or tenant admin)
     """
-    if current_user.role != "admin" and current_user.tenant_id != tenant_id:
+    if current_user["role"] != "admin" and current_user["tenant_id"] != tenant_id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant = await tenants_repo.find_one({"_id": tenant_id})
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    return tenant
+    # Transform MongoDB '_id' to 'id' for Pydantic
+    tenant_dict = dict(tenant)
+    tenant_dict["id"] = tenant_dict.pop("_id")
+    # Ensure created_at exists with a valid datetime
+    if "created_at" not in tenant_dict or tenant_dict["created_at"] is None:
+        tenant_dict["created_at"] = datetime.utcnow()
+    
+    return TenantWithRoles(**tenant_dict)
 
 @router.post("/tenants", response_model=TenantSchema)
-def create_tenant(
-    tenant: TenantCreate,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def create_tenant(
+    tenant_data: TenantCreate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a new tenant (admin only)
     """
-    if current_user.role != "admin":
+    if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    try:
-        db_tenant = Tenant(**tenant.model_dump())
-        db.add(db_tenant)
-        db.commit()
-        db.refresh(db_tenant)
+    new_tenant = tenant_data.dict()
+    # Add created_at if not provided
+    if "created_at" not in new_tenant or new_tenant["created_at"] is None:
+        new_tenant["created_at"] = datetime.utcnow()
         
-        # Create a default admin role for this tenant
-        admin_role = Role(
-            name="tenant_admin",
-            description="Default administrator role for the tenant",
-            tenant_id=db_tenant.id
-        )
-        db.add(admin_role)
-        db.commit()
-        
-        return db_tenant
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Tenant with this name already exists")
+    inserted_id = await tenants_repo.insert_one(new_tenant)
+    bucket_name = f"AWS_S3_BUCKET_{inserted_id}"
+    await create_s3_bucket(bucket_name)
+    created = await tenants_repo.find_one({"_id": inserted_id})
+    
+    # Transform MongoDB '_id' to 'id' for Pydantic
+    tenant_dict = dict(created)
+    tenant_dict["id"] = tenant_dict.pop("_id")
+    # Ensure created_at exists with a valid datetime
+    if "created_at" not in tenant_dict or tenant_dict["created_at"] is None:
+        tenant_dict["created_at"] = datetime.utcnow()
+    
+    return TenantSchema(**tenant_dict)
 
 @router.put("/tenants/{tenant_id}", response_model=TenantSchema)
-def update_tenant(
-    tenant_id: int,
-    tenant_update: TenantUpdate,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def update_tenant(
+    tenant_id: str,
+    tenant_data: TenantUpdate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Update a tenant (admin only)
     """
-    if current_user.role != "admin":
+    if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not db_tenant:
+    await tenants_repo.update_one({"_id": tenant_id}, tenant_data.dict(exclude_unset=True))
+    updated = await tenants_repo.find_one({"_id": tenant_id})
+    if not updated:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    update_data = tenant_update.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_tenant, key, value)
+    # Transform MongoDB '_id' to 'id' for Pydantic
+    tenant_dict = dict(updated)
+    tenant_dict["id"] = tenant_dict.pop("_id")
+    # Ensure created_at exists with a valid datetime
+    if "created_at" not in tenant_dict or tenant_dict["created_at"] is None:
+        tenant_dict["created_at"] = datetime.utcnow()
     
-    db.commit()
-    db.refresh(db_tenant)
-    return db_tenant
+    return TenantSchema(**tenant_dict)
 
 @router.delete("/tenants/{tenant_id}")
-def delete_tenant(
-    tenant_id: int,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def delete_tenant(
+    tenant_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Delete a tenant (admin only)
     """
-    if current_user.role != "admin":
+    if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     # Check if it's the default tenant (ID 1)
-    if tenant_id == 1:
+    if tenant_id == "1":
         raise HTTPException(status_code=400, detail="Cannot delete the default tenant")
     
-    db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not db_tenant:
+    result = await tenants_repo.delete_one({"_id": tenant_id})
+    if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    # Check if there are users in this tenant
-    user_count = db.query(DBUser).filter(DBUser.tenant_id == tenant_id).count()
-    if user_count > 0:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Cannot delete tenant with active users. Transfer or delete {user_count} users first."
-        )
-    
-    db.delete(db_tenant)
-    db.commit()
     return {"message": "Tenant deleted successfully"}
 
 # Role endpoints
 @router.get("/tenants/{tenant_id}/roles", response_model=List[RoleSchema])
-def get_tenant_roles(
-    tenant_id: int,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def list_tenant_roles(
+    tenant_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get all roles for a specific tenant
     """
-    if current_user.role != "admin" and current_user.tenant_id != tenant_id:
+    if current_user["role"] != "admin" and current_user["tenant_id"] != tenant_id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    roles = db.query(Role).filter(Role.tenant_id == tenant_id).all()
-    return roles
+    roles = await roles_repo.find_many({"tenant_id": tenant_id})
+    transformed_roles = []
+    for r in roles:
+        # Transform MongoDB '_id' to 'id' for Pydantic
+        role_dict = dict(r)
+        role_dict["id"] = role_dict.pop("_id")
+        transformed_roles.append(role_dict)
+    
+    return [RoleSchema(**r) for r in transformed_roles]
 
 @router.post("/tenants/{tenant_id}/roles", response_model=RoleSchema)
-def create_tenant_role(
-    tenant_id: int,
-    role: RoleCreate,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def create_tenant_role(
+    tenant_id: str,
+    role_data: RoleCreate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a new role for a tenant
     """
-    if current_user.role != "admin" and current_user.tenant_id != tenant_id:
+    if current_user["role"] != "admin" and current_user["tenant_id"] != tenant_id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     # Ensure the tenant exists
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant = await tenants_repo.find_one({"_id": tenant_id})
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
     # Create the role
-    db_role = Role(**role.model_dump())
-    db.add(db_role)
-    db.commit()
-    db.refresh(db_role)
+    doc = role_data.dict()
+    doc["tenant_id"] = tenant_id
+    inserted_id = await roles_repo.insert_one(doc)
+    created_role = await roles_repo.find_one({"_id": inserted_id})
     
-    return db_role
+    # Transform MongoDB '_id' to 'id' for Pydantic
+    role_dict = dict(created_role)
+    role_dict["id"] = role_dict.pop("_id")
+    
+    return RoleSchema(**role_dict)
 
 @router.put("/roles/{role_id}", response_model=RoleSchema)
-def update_role(
-    role_id: int,
-    role_update: RoleUpdate,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def update_role(
+    role_id: str,
+    role_data: RoleUpdate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Update a role
     """
     # Get the role
-    db_role = db.query(Role).filter(Role.id == role_id).first()
-    if not db_role:
+    role = await roles_repo.find_one({"_id": role_id})
+    if not role:
         raise HTTPException(status_code=404, detail="Role not found")
     
     # Check permissions
-    if current_user.role != "admin" and current_user.tenant_id != db_role.tenant_id:
+    if current_user["role"] != "admin" and current_user["tenant_id"] != role["tenant_id"]:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     # Update basic fields
-    update_data = role_update.model_dump(exclude={"permission_ids"}, exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_role, key, value)
+    await roles_repo.update_one({"_id": role_id}, role_data.dict(exclude_unset=True))
+    updated = await roles_repo.find_one({"_id": role_id})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Role not found")
     
-    # Update permissions if provided
-    if role_update.permission_ids is not None:
-        # Clear existing permissions
-        db_role.permissions = []
-        
-        # Add new permissions
-        for perm_id in role_update.permission_ids:
-            permission = db.query(Permission).filter(Permission.id == perm_id).first()
-            if permission:
-                db_role.permissions.append(permission)
+    # Transform MongoDB '_id' to 'id' for Pydantic
+    role_dict = dict(updated)
+    role_dict["id"] = role_dict.pop("_id")
     
-    db.commit()
-    db.refresh(db_role)
-    return db_role
+    return RoleSchema(**role_dict)
 
 @router.delete("/roles/{role_id}")
-def delete_role(
-    role_id: int,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def delete_role(
+    role_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Delete a role
     """
     # Get the role
-    db_role = db.query(Role).filter(Role.id == role_id).first()
-    if not db_role:
+    updated = await roles_repo.find_one({"_id": role_id})
+    if not updated:
         raise HTTPException(status_code=404, detail="Role not found")
     
     # Check permissions
-    if current_user.role != "admin" and current_user.tenant_id != db_role.tenant_id:
+    if current_user["role"] != "admin" and current_user["tenant_id"] != updated["tenant_id"]:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    # Check if users are assigned to this role
-    user_count = db.query(DBUser).filter(DBUser.role_id == role_id).count()
-    if user_count > 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot delete role with assigned users. Reassign {user_count} users first."
-        )
+    result = await roles_repo.delete_one({"_id": role_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Role not found")
     
-    db.delete(db_role)
-    db.commit()
     return {"message": "Role deleted successfully"}
 
 # Permission endpoints
 @router.get("/permissions", response_model=List[PermissionSchema])
-def get_permissions(
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def list_permissions(
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get all permissions
     """
-    if current_user.role != "admin":
+    if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    permissions = db.query(Permission).all()
-    return permissions
+    permissions = await permissions_repo.find_many({})
+    transformed_permissions = []
+    for p in permissions:
+        # Transform MongoDB '_id' to 'id' for Pydantic
+        perm_dict = dict(p)
+        perm_dict["id"] = perm_dict.pop("_id")
+        transformed_permissions.append(perm_dict)
+    
+    return [PermissionSchema(**p) for p in transformed_permissions]
 
 @router.post("/permissions", response_model=PermissionSchema)
-def create_permission(
-    permission: PermissionCreate,
-    db: Session = Depends(get_db),
-    current_user: DBUser = Depends(get_current_user)
+async def create_permission(
+    permission_data: PermissionCreate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a new permission (admin only)
     """
-    if current_user.role != "admin":
+    if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    try:
-        db_permission = Permission(**permission.model_dump())
-        db.add(db_permission)
-        db.commit()
-        db.refresh(db_permission)
-        return db_permission
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Permission with this name already exists") 
+    inserted_id = await permissions_repo.insert_one(permission_data.dict())
+    new_perm = await permissions_repo.find_one({"_id": inserted_id})
+    
+    # Transform MongoDB '_id' to 'id' for Pydantic
+    perm_dict = dict(new_perm)
+    perm_dict["id"] = perm_dict.pop("_id")
+    
+    return PermissionSchema(**perm_dict)

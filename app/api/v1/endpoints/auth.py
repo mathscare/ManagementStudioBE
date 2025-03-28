@@ -11,6 +11,8 @@ from app.schemas.user import UserCreate, UserResponse
 from app.core.config import SECRET_KEY, ALGORITHM
 from jose import jwt, JWTError
 from uuid import UUID, uuid4
+from app.utils.s3 import create_s3_bucket
+from datetime import datetime
 
 router = APIRouter()
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -48,9 +50,12 @@ async def signup(user: UserCreate):
         tenant = {
             "_id": str(tenant_id),
             "name": user.organization_name,
-            "description": f"Tenant for {user.organization_name}"
+            "description": f"Tenant for {user.organization_name}",
+            "created_at" : datetime.utcnow()
         }
         await tenants_repo.insert_one(tenant)
+        bucket_name = f"AWS_S3_BUCKET_{tenant_id}"
+        await create_s3_bucket(bucket_name)
     
     role_id = user.role_id
     if role_id:

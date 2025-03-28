@@ -7,8 +7,7 @@ from app.core.security import get_current_user
 from uuid import uuid4
 from datetime import datetime, timedelta
 import json
-from app.utils.s3 import upload_file_to_s3, get_download_url, delete_object
-from app.core.config import FILE_AWS_S3_BUCKET
+from app.utils.s3 import upload_file_to_s3, delete_object,generate_presigned_url
 from fastapi.responses import StreamingResponse
 import io
 import csv
@@ -18,6 +17,10 @@ router = APIRouter()
 files_repo = FilesRepository()
 tags_repo = TagsRepository()
 
+"""
+Note: Buckets are now automatically created in the tenant creation process.
+"""
+
 @router.post("/upload", response_model=FileUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
@@ -25,6 +28,7 @@ async def upload_file(
     current_user: dict = Depends(get_current_user)
 ):
     tenant_id = current_user.get("tenant_id")
+    bucket_name = f"AWS_S3_BUCKET_{tenant_id}"
     
     # Parse tags from form data
     try:
@@ -34,7 +38,7 @@ async def upload_file(
     
     # Upload file to S3
     s3_key = f"{tenant_id}/{str(uuid4())}/{file.filename}"
-    s3_url = await upload_file_to_s3(file, s3_key)
+    s3_url = await upload_file_to_s3(file, s3_key, bucket_name)
     
     # Create file record
     file_id = str(uuid4())
@@ -99,35 +103,18 @@ async def download_file(
     current_user: dict = Depends(get_current_user)
 ):
     tenant_id = current_user.get("tenant_id")
+    bucket_name = f"AWS_S3_BUCKET_{tenant_id}"
     
     # Get file record from database
     file = await files_repo.find_one({"_id": file_id, "tenant_id": tenant_id})
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    # Calculate file age
-    now = datetime.now()
-    created_at = file.get("created_at", now)
-    file_age = now - created_at
-    
-    # Check if file needs restoration from Glacier
     s3_key = file["s3_key"]
-    status, url = await get_download_url(FILE_AWS_S3_BUCKET,s3_key, file_age)
+    # Remove Glacier checks; directly get download URL
+    url = await generate_presigned_url(bucket_name, s3_key)
     
-    if status == "ready":
-        # If file is ready for download, update the URL in the database if needed
-        if file_age >= timedelta(days=2) and url != file.get("s3_url"):
-            await files_repo.update_one(
-                {"_id": file_id},
-                {
-                    "restored_url": url,
-                    "restored_url_expiration": datetime.now() + timedelta(days=2)
-                }
-            )
-        return {"status": "ready", "download_url": url}
-    else:
-        # File is being restored
-        return {"status": "pending", "message": url}
+    return {"download_url": url}
 
 @router.get("/files", response_model=List[FileOut])
 async def get_files(
