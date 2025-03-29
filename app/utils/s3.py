@@ -101,9 +101,8 @@ async def upload_file_to_s3(file: UploadFile, key:str = None, bucket: str = None
             file.file,
             valid_bucket,
             key,
-            ExtraArgs={
-                'ContentType': content_type
-            }
+            ExtraArgs={'ContentDisposition': 'attachment'}
+
         )
         
         # Try to make the object public via ACL
