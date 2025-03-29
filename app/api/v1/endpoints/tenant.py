@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from typing import List, Dict, Any
 from datetime import datetime
+from uuid import uuid4
 from app.db.repository.tenants import TenantsRepository
 from app.db.repository.roles import RolesRepository
 from app.db.repository.permissions import PermissionsRepository
@@ -87,22 +88,29 @@ async def create_tenant(
     if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
+    # Create a new tenant with a UUID as _id
     new_tenant = tenant_data.dict()
-    # Add created_at if not provided
-    if "created_at" not in new_tenant or new_tenant["created_at"] is None:
-        new_tenant["created_at"] = datetime.utcnow()
+    new_tenant["_id"] = str(uuid4())  # Explicitly set _id as UUID string
+    
+    # Add created_at, updated_at, and is_active fields
+    current_time = datetime.utcnow()
+    new_tenant["created_at"] = current_time
+    new_tenant["updated_at"] = current_time
+    new_tenant["is_active"] = True
         
-    inserted_id = await tenants_repo.insert_one(new_tenant)
-    bucket_name = f"AWS_S3_BUCKET_{inserted_id}"
+    # Insert into database
+    await tenants_repo.insert_one(new_tenant)
+    
+    # Create S3 bucket for the tenant
+    bucket_name = f"AWS_S3_BUCKET_{new_tenant['_id']}"
     await create_s3_bucket(bucket_name)
-    created = await tenants_repo.find_one({"_id": inserted_id})
+    
+    # Get the created tenant
+    created = await tenants_repo.find_one({"_id": new_tenant["_id"]})
     
     # Transform MongoDB '_id' to 'id' for Pydantic
     tenant_dict = dict(created)
     tenant_dict["id"] = tenant_dict.pop("_id")
-    # Ensure created_at exists with a valid datetime
-    if "created_at" not in tenant_dict or tenant_dict["created_at"] is None:
-        tenant_dict["created_at"] = datetime.utcnow()
     
     return TenantSchema(**tenant_dict)
 
@@ -192,11 +200,21 @@ async def create_tenant_role(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    # Create the role
+    # Create the role with a UUID as _id
     doc = role_data.dict()
+    doc["_id"] = str(uuid4())  # Explicitly set _id as UUID string
     doc["tenant_id"] = tenant_id
-    inserted_id = await roles_repo.insert_one(doc)
-    created_role = await roles_repo.find_one({"_id": inserted_id})
+    
+    # Add timestamps
+    current_time = datetime.utcnow()
+    doc["created_at"] = current_time
+    doc["updated_at"] = current_time
+    
+    # Insert into database
+    await roles_repo.insert_one(doc)
+    
+    # Get the created role
+    created_role = await roles_repo.find_one({"_id": doc["_id"]})
     
     # Transform MongoDB '_id' to 'id' for Pydantic
     role_dict = dict(created_role)
@@ -289,8 +307,20 @@ async def create_permission(
     if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    inserted_id = await permissions_repo.insert_one(permission_data.dict())
-    new_perm = await permissions_repo.find_one({"_id": inserted_id})
+    # Create permission with a UUID as _id
+    perm_dict = permission_data.dict()
+    perm_dict["_id"] = str(uuid4())  # Explicitly set _id as UUID string
+    
+    # Add timestamps
+    current_time = datetime.utcnow()
+    perm_dict["created_at"] = current_time
+    perm_dict["updated_at"] = current_time
+    
+    # Insert into database
+    await permissions_repo.insert_one(perm_dict)
+    
+    # Get the created permission
+    new_perm = await permissions_repo.find_one({"_id": perm_dict["_id"]})
     
     # Transform MongoDB '_id' to 'id' for Pydantic
     perm_dict = dict(new_perm)

@@ -51,7 +51,9 @@ async def signup(user: UserCreate):
             "_id": str(tenant_id),
             "name": user.organization_name,
             "description": f"Tenant for {user.organization_name}",
-            "created_at" : datetime.utcnow()
+            "created_at" : datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+            "is_active": True
         }
         await tenants_repo.insert_one(tenant)
         bucket_name = f"AWS_S3_BUCKET_{tenant_id}"
@@ -70,7 +72,9 @@ async def signup(user: UserCreate):
                 "_id": str(role_id),
                 "name": "user",
                 "description": "Default user role for the tenant",
-                "tenant_id": str(tenant_id)
+                "tenant_id": str(tenant_id),
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
             }
             await roles_repo.insert_one(user_role)
         else:
@@ -82,7 +86,10 @@ async def signup(user: UserCreate):
         "email": user.email,
         "hashed_password": hashed_password,
         "role_id": str(role_id),
-        "tenant_id": str(tenant_id)
+        "tenant_id": str(tenant_id),
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+        "is_active": True
     }
 
     await users_repo.insert_one(new_user)

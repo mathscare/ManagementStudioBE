@@ -110,6 +110,8 @@ async def add_event_attachments(
     
     return Event(**updated_event)
 
+
+
 @router.get("/", response_model=List[Event])
 async def get_events(
     offset: int = Query(0, ge=0),
@@ -357,3 +359,66 @@ async def delete_event(
     await events_repo.delete_one({"_id": event_id})
     
     return {"message": "Event deleted successfully"}
+
+@router.delete("/{event_id}/attachments", response_model=Event)
+async def delete_event_attachments(
+    event_id: str,
+    attachment_urls: str = Query(..., description="Comma-separated list of attachment URLs to delete"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Delete specific attachments from an event. Requires a comma-separated list of attachment URLs.
+    """
+    tenant_id = current_user["tenant_id"]
+    
+    # Find the event
+    event = await events_repo.find_one({"_id": event_id, "tenant_id": tenant_id})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Get existing attachments
+    existing_attachments = event["attachments"].split(",") if event["attachments"] else []
+    existing_attachments = [a for a in existing_attachments if a]  # Remove empty strings
+    
+    # Parse attachment_urls to get URLs to delete
+    urls_to_delete = [url.strip() for url in attachment_urls.split(",") if url.strip()]
+    
+    # Validate that all URLs to delete exist in the event
+    invalid_urls = [url for url in urls_to_delete if url not in existing_attachments]
+    if invalid_urls:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"The following attachment URLs were not found in the event: {', '.join(invalid_urls)}"
+        )
+    
+    # Delete attachments from S3
+    bucket_name = f"AWS_S3_BUCKET_{tenant_id}"
+    for url in urls_to_delete:
+        try:
+            # Extract the S3 key from the URL
+            s3_key = url.split(".amazonaws.com/")[1]
+            await delete_object(bucket_name, s3_key)
+        except Exception as e:
+            print(f"Error deleting attachment from S3: {str(e)}")
+    
+    # Update the event's attachments list
+    remaining_attachments = [url for url in existing_attachments if url not in urls_to_delete]
+    updated_attachments = ",".join(remaining_attachments)
+    
+    # Update the event record
+    await events_repo.update_one(
+        {"_id": event_id}, 
+        {
+            "attachments": updated_attachments,
+            "updated_at": datetime.utcnow()
+        }
+    )
+    
+    # Get the updated event
+    updated_event = await events_repo.find_one({"_id": event_id})
+    
+    # Format for response
+    updated_event["attachments"] = updated_event["attachments"].split(",") if updated_event["attachments"] else []
+    updated_event["id"] = updated_event.pop("_id")
+    
+    return Event(**updated_event)
