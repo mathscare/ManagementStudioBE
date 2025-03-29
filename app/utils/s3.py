@@ -64,7 +64,7 @@ def get_valid_bucket_name(tenant_id: str) -> str:
     
     return bucket_name
 
-async def upload_file_to_s3(file: UploadFile, bucket: str = None) -> str:
+async def upload_file_to_s3(file: UploadFile, key:str = None, bucket: str = None) -> str:
     """
     Upload a file to S3 and ensure it's publicly accessible.
     Uses multiple approaches to maximize the chance of public access.
@@ -80,9 +80,8 @@ async def upload_file_to_s3(file: UploadFile, bucket: str = None) -> str:
     valid_bucket = get_valid_bucket_name(bucket) if bucket else bucket
     
     # Generate a unique key for the file
-    file_extension = file.filename.split(".")[-1] if "." in file.filename else "dat"
-    unique_filename = f"{uuid4()}.{file_extension}"
-    key = unique_filename
+    unique_filename = f"{uuid4()}.{file.filename}"
+    key = unique_filename if not key else key
     
     # Get content type
     content_type = getattr(file, 'content_type', 'application/octet-stream')

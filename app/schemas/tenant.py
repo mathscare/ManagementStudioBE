@@ -11,7 +11,7 @@ class PermissionCreate(PermissionBase):
     pass
 
 class Permission(PermissionBase):
-    _id: UUID
+    id: UUID
 
 class RoleBase(BaseModel):
     name: str
@@ -27,7 +27,7 @@ class RoleUpdate(BaseModel):
     permission_ids: Optional[List[UUID]] = None
 
 class Role(RoleBase):
-    _id: UUID
+    id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
     permissions: List[Permission] = []
@@ -46,7 +46,7 @@ class TenantUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class Tenant(TenantBase):
-    _id: UUID
+    id: UUID
     created_at: datetime = None
     updated_at: Optional[datetime] = None
 

@@ -20,6 +20,9 @@ class EventBase(BaseModel):
     website: Optional[HttpUrl] = None
     attachments: Optional[List[str]] = None
     status: Optional[str] = None
+    is_camera_man_hired: Optional[bool] = False
+    camera_man_name: Optional[str] = None
+    camera_man_number: Optional[str] = None
 
 class EventCreate(EventBase):
     pass
@@ -40,6 +43,9 @@ class EventUpdate(BaseModel):
     travel_accomodation: Optional[str] = None
     website: Optional[HttpUrl] = None
     attachments: Optional[List[str]] = None
+    is_camera_man_hired: Optional[bool] = None
+    camera_man_name: Optional[str] = None
+    camera_man_number: Optional[str] = None
 
 class EventStatusUpdate(BaseModel):
     status: str

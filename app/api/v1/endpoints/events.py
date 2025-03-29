@@ -48,6 +48,14 @@ async def create_event(
     event_dict["updated_at"] = datetime.utcnow()
     event_dict["is_active"] = True
     
+    # Set default values for camera man fields if not provided
+    if "is_camera_man_hired" not in event_dict:
+        event_dict["is_camera_man_hired"] = False
+    if "camera_man_number" not in event_dict:
+        event_dict["camera_man_number"] = ""
+    if "camera_man_name" not in event_dict:
+        event_dict["camera_man_name"] = ""
+    
     # Prepare for MongoDB storage
     event_dict = prepare_event_for_storage(event_dict)
     
@@ -294,7 +302,8 @@ async def get_events_csv(
         "id", "contact_name", "contact_number", "description", "email",
         "event_date", "event_name", "expected_audience", "fees", "institute_name",
         "is_paid_event", "location", "payment_status", "travel_accomodation",
-        "website", "attachments", "status", "created_at", "updated_at", "is_active"
+        "website", "attachments", "status", "created_at", "updated_at", "is_active",
+        "is_camera_man_hired", "camera_man_name", "camera_man_number"
     ]
     
     # Special field handling

@@ -22,6 +22,9 @@ class Event(BaseModel):
     attachments: Optional[str] = None
     status: str = "pending"
     tenant_id: UUID
+    is_camera_man_hired: bool = False
+    camera_man_name: Optional[str] = None
+    camera_man_number: Optional[str] = None
 
     class Config:
         arbitrary_types_allowed = True

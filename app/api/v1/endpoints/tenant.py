@@ -43,13 +43,13 @@ async def list_tenants(
     tenants = await tenants_repo.find_many({}, skip=skip, limit=limit)
     transformed_tenants = []
     for t in tenants:
-        # Transform MongoDB '_id' to 'id' for Pydantic
         tenant_dict = dict(t)
+        # Transform MongoDB '_id' to 'id' for Pydantic
         tenant_dict["id"] = tenant_dict.pop("_id")
-        # Ensure created_at exists with a valid datetime
         if "created_at" not in tenant_dict or tenant_dict["created_at"] is None:
             tenant_dict["created_at"] = datetime.utcnow()
         transformed_tenants.append(tenant_dict)
+    print (TenantSchema(**transformed_tenants[0]))
     
     return [TenantSchema(**t) for t in transformed_tenants]
 

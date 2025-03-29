@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Header, File, UploadFile, Form
 from pydantic import BaseModel
 from datetime import timedelta
+from typing import Optional
 from fastapi.security import OAuth2PasswordRequestForm
 from app.core.security import create_access_token, pwd_context
 from app.db.repository.users import UsersRepository
@@ -11,8 +12,10 @@ from app.schemas.user import UserCreate, UserResponse
 from app.core.config import SECRET_KEY, ALGORITHM
 from jose import jwt, JWTError
 from uuid import UUID, uuid4
-from app.utils.s3 import create_s3_bucket
+from app.utils.s3 import create_s3_bucket, upload_file_to_s3
+import io
 from datetime import datetime
+
 
 router = APIRouter()
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -28,7 +31,10 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/signup/", response_model=UserResponse)
-async def signup(user: UserCreate):
+async def signup(
+    user: UserCreate = Depends(),
+    profile_pic: Optional[UploadFile] = File(None)
+):
     query = {
         "$and": [
             {"tenant_id": str(user.tenant_id)} if user.tenant_id else {},
@@ -80,6 +86,20 @@ async def signup(user: UserCreate):
         else:
             role_id = UUID(user_role["_id"])
 
+    # Handle profile picture upload
+    profile_pic_url = None
+    if profile_pic:
+        user_id = str(uuid4())
+        bucket_name = f"AWS_S3_BUCKET_{tenant_id}"
+        file_extension = profile_pic.filename.split('.')[-1]
+        file_key = f"profile_pics/{user_id}.{file_extension}"
+        
+        profile_pic_url = await upload_file_to_s3(
+            file=profile_pic,
+            key=file_key,
+            bucket=bucket_name
+        )
+
     new_user = {
         "_id": str(uuid4()),
         "username": user.username,
@@ -87,19 +107,56 @@ async def signup(user: UserCreate):
         "hashed_password": hashed_password,
         "role_id": str(role_id),
         "tenant_id": str(tenant_id),
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "phone_number": user.phone_number,
+        "guardian": user.guardian,
+        "guardian_number": user.guardian_number,
+        "city": user.city,
+        "state": user.state,
+        "country": user.country,
+        "address_line1": user.address_line1,
+        "address_line2": user.address_line2,
+        "pincode": user.pincode,
+        "aadhar_card_number": user.aadhar_card_number,
+        "bank_name": user.bank_name,
+        "account_number": user.account_number,
+        "ifsc_code": user.ifsc_code,
+        "profile_pic_url": profile_pic_url,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
         "is_active": True
     }
 
     await users_repo.insert_one(new_user)
+    
+    # Get the role name for the response
+    role = await roles_repo.find_one({"_id": str(role_id)})
+    role_name = role["name"] if role else "user"
+    
     return UserResponse(
         _id=new_user["_id"],
         username=new_user["username"],
         email=new_user["email"],
-        role="user",
+        role=role_name,
         tenant_id=new_user["tenant_id"],
-        role_id=new_user["role_id"]
+        role_id=new_user["role_id"],
+        first_name=new_user.get("first_name"),
+        last_name=new_user.get("last_name"),
+        phone_number=new_user.get("phone_number"),
+        guardian=new_user.get("guardian"),
+        guardian_number=new_user.get("guardian_number"),
+        city=new_user.get("city"),
+        state=new_user.get("state"),
+        country=new_user.get("country"),
+        address_line1=new_user.get("address_line1"),
+        address_line2=new_user.get("address_line2"),
+        pincode=new_user.get("pincode"),
+        aadhar_card_number=new_user.get("aadhar_card_number"),
+        bank_name=new_user.get("bank_name"),
+        account_number=new_user.get("account_number"),
+        ifsc_code=new_user.get("ifsc_code"),
+        profile_pic_url=new_user.get("profile_pic_url")
     )
 
 @router.post("/login/", response_model=Token)
