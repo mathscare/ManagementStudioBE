@@ -16,7 +16,7 @@ class FileOut(BaseModel):
     file_name: str
     s3_key: str
     created_at: datetime
-    tags: List[UUID]
+    tags: List[TagOut]
 
     class Config:
         populate_by_name = True

@@ -120,28 +120,25 @@ async def download_file(
 async def get_files(
     offset: int = 0,
     limit: int = Query(default=10, le=100),
-    tag_id: Optional[str] = None,
+    tag: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
     tenant_id = current_user.get("tenant_id")
-    query = {"tenant_id": tenant_id}
     
-    if tag_id:
-        # Find files with the specified tag
-        tag = await tags_repo.find_one({"_id": tag_id, "tenant_id": tenant_id})
-        if tag and "files" in tag:
-            query["_id"] = {"$in": tag["files"]}
+    files = await files_repo.files_with_tags(tenant_id=tenant_id, limit=limit, skip=offset)
+
     
-    files = await files_repo.find_many(query, limit=limit, skip=offset)
-    return [
-        {
+    result = []
+    for file in files:
+        result.append({
             "id": file["_id"],
             "file_name": file["file_name"],
             "s3_key": file["s3_key"],
             "created_at": file["created_at"],
-            "tags": file.get("tags", [])
-        } for file in files
-    ]
+            "tags": file.get("tags", [])  # Leave as list of tag IDs to match schema
+        })
+    
+    return result
 
 @router.get("/files/search", response_model=List[FileOut])
 async def search_files(
@@ -199,15 +196,19 @@ async def search_files(
                 ]
                 
             files = await files_repo.aggregate(pipeline)
-            return [
-                {
+            
+            # Format the response with tag IDs only to match the FileOut schema
+            result = []
+            for file in files:
+                result.append({
                     "id": file["_id"],
                     "file_name": file["file_name"],
                     "s3_key": file["s3_key"],
                     "created_at": file["created_at"],
-                    "tags": file.get("tags", [])
-                } for file in files
-            ]
+                    "tags": file.get("tags", [])  # Leave as list of tag IDs
+                })
+            
+            return result
     
     # Standard query
     search_query = {"tenant_id": tenant_id}
@@ -258,15 +259,18 @@ async def search_files(
     
     # Get files matching the criteria
     files = await files_repo.find_many(search_query, limit=limit, skip=offset)
-    return [
-        {
+    
+    result = []
+    for file in files:
+        result.append({
             "id": file["_id"],
             "file_name": file["file_name"],
             "s3_key": file["s3_key"],
             "created_at": file["created_at"],
-            "tags": file.get("tags", [])
-        } for file in files
-    ]
+            "tags": file.get("tags", [])  # Return tag IDs only
+        })
+    
+    return result
 
 @router.get("/tags", response_model=List[TagOut])
 async def get_tags(
@@ -431,14 +435,15 @@ async def update_file_tags(
     # Update file with new tags
     await files_repo.update_one({"_id": file_id}, {"tags": new_tag_ids})
     
-    # Return updated file
-    updated_file = await files_repo.find_one({"_id": file_id})
+    # Return updated file with only tag IDs to match the FileOut schema
+    updated_file = await files_repo.files_with_tags(tenant_id=tenant_id, limit=1, skip=0,id=file_id)
+    
     return {
         "id": updated_file["_id"],
         "file_name": updated_file["file_name"],
         "s3_key": updated_file["s3_key"],
         "created_at": updated_file["created_at"],
-        "tags": updated_file.get("tags", [])
+        "tags": updated_file.get("tags", [])  # Return tag IDs only
     }
 
 @router.delete("/files/{file_id}")
