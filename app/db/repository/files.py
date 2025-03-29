@@ -33,7 +33,7 @@ class FilesRepository:
         pipeline = []
         if id:
             pipeline.append({"$match": {"_id": id}})
-        pipeline.append([
+        pipeline.extend([
             {"$match": {"tenant_id": tenant_id}},
             {"$skip": skip},
             {"$limit": limit},
