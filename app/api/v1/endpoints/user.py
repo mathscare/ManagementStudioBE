@@ -196,15 +196,13 @@ async def update_user_profile(
     # Handle profile picture upload if provided
     if profile_pic:
         bucket_name = f"AWS_S3_BUCKET_{user['tenant_id']}"
-        file_content = await profile_pic.read()
         file_extension = profile_pic.filename.split('.')[-1]
         file_key = f"profile_pics/{user_id}.{file_extension}"
         
         profile_pic_url = await upload_file_to_s3(
-            bucket_name=bucket_name,
-            file_key=file_key,
-            file_content=io.BytesIO(file_content),
-            content_type=profile_pic.content_type
+            bucket=bucket_name,
+            key=file_key,
+            file=profile_pic,
         )
         
         update_data["profile_pic_url"] = profile_pic_url
