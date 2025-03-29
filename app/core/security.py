@@ -21,10 +21,10 @@ def create_access_token(data: dict, expires_delta: timedelta):
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
+        id: str = payload.get("_id")
         tenant_id: str = payload.get("tenant_id")
         
-        if username is None or tenant_id is None:
+        if id is None or tenant_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token",
@@ -33,7 +33,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             
         # Since we're using MongoDB, return payload info as the user
         user_data = {
-            "username": username,
+            "_id": id,
             "tenant_id": tenant_id,
             "role": payload.get("role"),
         }

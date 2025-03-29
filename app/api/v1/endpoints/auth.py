@@ -172,7 +172,7 @@ async def login(
         
         role = await roles_repo.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
         token_data = {
-            "sub": user["username"], 
+            "_id": user["_id"] if "_id" in user else user.get("id"),
             "tenant_id": user["tenant_id"],
             "role": role["name"] if role else None
         }
@@ -212,7 +212,7 @@ async def swagger_login(login_data: OAuth2PasswordRequestForm = Depends()):
         
         role = await roles_repo.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
         token_data = {
-            "sub": user["username"], 
+            "_id": user["_id"] if "_id" in user else user.get("id"),
             "tenant_id": tenant_id,
             "role": role["name"] if role else None
         }
@@ -255,7 +255,7 @@ async def refresh_token(refresh_token: str):
 
         role = await roles_repo.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
         token_data = {
-            "sub": user["username"], 
+            "_id": user["_id"] if "_id" in user else user.get("id"),
             "tenant_id": user["tenant_id"],
             "role": role["name"] if role else None
         }

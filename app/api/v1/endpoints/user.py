@@ -206,9 +206,10 @@ async def read_users_me(current_user: dict = Depends(get_current_user)):
     """
     Get current user information with tenant and role details
     """
+    print(f"Current user: {current_user}")
     user = await users_repo.find_one({"_id": current_user.get("_id")})
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="not found")
     
     role = await roles_repo.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
     
