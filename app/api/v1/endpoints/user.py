@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, Form, status
 from typing import List, Optional
 from app.db.repository.users import UsersRepository
 from app.db.repository.tenants import TenantsRepository
 from app.db.repository.roles import RolesRepository
-from app.schemas.user import UserResponse, UserWithDetails, UserRoleUpdate, UserProfileUpdate
+from app.schemas.user import UserResponse, UserWithDetails, UserRoleUpdate, UserProfileUpdate,UserWithDetailstoken
 from app.core.security import get_current_user
 from app.utils.s3 import upload_file_to_s3
 import io
@@ -60,6 +60,65 @@ async def get_users(
         result.append(user_response)
     
     return result
+
+@router.get("/me", response_model=UserWithDetails)
+async def read_users_me(current_user: dict = Depends(get_current_user)):
+    """
+    Get current user information with tenant and role details
+    """
+    print(f"Current user data from token: {current_user}")
+    
+    # Get the user ID directly from the token
+    user_id = current_user.get("_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user identification in token"
+        )
+    
+    print(f"Looking for user with ID from token: {user_id}")
+    
+    # Query using the ID from the token, not from the URL
+    user = await users_repo.find_one({"_id": user_id})
+    
+    if not user:
+        print(f"User with ID {user_id} not found in database")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"User with ID {user_id} not found in database"
+        )
+    
+    print(f"User found: {user.get('username')}")
+    role = await roles_repo.find_one({"_id": user.get("role_id")}) if user.get("role_id") else None
+    
+    # Return the user details
+    return UserWithDetails(
+        _id=user["_id"],
+        username=user["username"],
+        email=user["email"],
+        role=role["name"] if role else "user",
+        tenant_id=user["tenant_id"],
+        role_id=user.get("role_id"),
+        first_name=user.get("first_name"),
+        last_name=user.get("last_name"),
+        phone_number=user.get("phone_number"),
+        guardian=user.get("guardian"),
+        guardian_number=user.get("guardian_number"),
+        city=user.get("city"),
+        state=user.get("state"),
+        country=user.get("country"),
+        address_line1=user.get("address_line1"),
+        address_line2=user.get("address_line2"),
+        pincode=user.get("pincode"),
+        aadhar_card_number=user.get("aadhar_card_number"),
+        bank_name=user.get("bank_name"),
+        account_number=user.get("account_number"),
+        ifsc_code=user.get("ifsc_code"),
+        profile_pic_url=user.get("profile_pic_url"),
+        is_active=user.get("is_active"),
+        created_at=user.get("created_at"),
+        updated_at=user.get("updated_at")
+    )
 
 @router.get("/{user_id}", response_model=UserWithDetails)
 async def get_user(user_id: str, current_user: dict = Depends(get_current_user)):
@@ -200,43 +259,3 @@ async def delete_user(user_id: str, current_user: dict = Depends(get_current_use
     await users_repo.delete_one({"_id": user_id})
     
     return {"detail": "User deleted successfully"}
-
-@router.get("/me", response_model=UserWithDetails)
-async def read_users_me(current_user: dict = Depends(get_current_user)):
-    """
-    Get current user information with tenant and role details
-    """
-    print(f"Current user: {current_user}")
-    user = await users_repo.find_one({"_id": current_user.get("_id")})
-    if not user:
-        raise HTTPException(status_code=404, detail="not found")
-    
-    role = await roles_repo.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
-    
-    return UserWithDetails(
-        _id=user["_id"],
-        username=user["username"],
-        email=user["email"],
-        role=role["name"] if role else "user",
-        tenant_id=user["tenant_id"],
-        role_id=user.get("role_id"),
-        first_name=user.get("first_name"),
-        last_name=user.get("last_name"),
-        phone_number=user.get("phone_number"),
-        guardian=user.get("guardian"),
-        guardian_number=user.get("guardian_number"),
-        city=user.get("city"),
-        state=user.get("state"),
-        country=user.get("country"),
-        address_line1=user.get("address_line1"),
-        address_line2=user.get("address_line2"),
-        pincode=user.get("pincode"),
-        aadhar_card_number=user.get("aadhar_card_number"),
-        bank_name=user.get("bank_name"),
-        account_number=user.get("account_number"),
-        ifsc_code=user.get("ifsc_code"),
-        profile_pic_url=user.get("profile_pic_url"),
-        is_active=user.get("is_active"),
-        created_at=user.get("created_at"),
-        updated_at=user.get("updated_at")
-    )

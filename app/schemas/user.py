@@ -38,6 +38,11 @@ class UserResponse(BaseModel):
 class UserWithDetails(UserResponse):
     pass
 
+class UserWithDetailstoken(BaseModel):
+    id: str
+    role : str = "user"
+    tenant_id: str
+
 class UserCreate(BaseModel):
     username: str
     email: EmailStr

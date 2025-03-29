@@ -20,10 +20,12 @@ def create_access_token(data: dict, expires_delta: timedelta):
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
+        print(f"Token received: {token[:10]}...") # Print part of token for debugging
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        print(f"Decoded JWT payload: {payload}")
+        
         id: str = payload.get("_id")
         tenant_id: str = payload.get("tenant_id")
-        
         if id is None or tenant_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -33,19 +35,28 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             
         # Since we're using MongoDB, return payload info as the user
         user_data = {
-            "_id": id,
+            "_id": id,  # Changed from "id" to "_id" to match MongoDB document structure
             "tenant_id": tenant_id,
             "role": payload.get("role"),
         }
         
         if "role_id" in payload:
             user_data["role_id"] = payload.get("role_id")
-            
+        
+        print(f"Returning user data from token: {user_data}")
         return user_data
 
-    except JWTError:
+    except JWTError as e:
+        print(f"JWT Error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        print(f"Unexpected error in authentication: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Authentication error: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
