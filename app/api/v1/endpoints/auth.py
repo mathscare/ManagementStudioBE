@@ -243,13 +243,13 @@ async def swagger_login(login_data: OAuth2PasswordRequestForm = Depends()):
 async def refresh_token(refresh_token: str):
     try:
         payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
+        id = payload.get("_id")
         tenant_id = payload.get("tenant_id")
         
-        if username is None or tenant_id is None:
+        if id is None or tenant_id is None:
             raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-        user = await users_repo.find_one({"username": username, "tenant_id": tenant_id})
+        user = await users_repo.find_one({"_id": id, "tenant_id": tenant_id})
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
 
