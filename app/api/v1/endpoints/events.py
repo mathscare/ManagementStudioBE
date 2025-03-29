@@ -93,7 +93,8 @@ async def add_event_attachments(
     # Upload new files
     new_attachment_urls = []
     for file in files:
-        url = await upload_file_to_s3(file, bucket_name)
+        key = f"{uuid4()}.{file.filename}"
+        url = await upload_file_to_s3(file,key, bucket_name)
         new_attachment_urls.append(url)
     
     # Combine attachments and update
