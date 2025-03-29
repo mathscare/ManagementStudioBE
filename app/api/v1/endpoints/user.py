@@ -66,7 +66,6 @@ async def read_users_me(current_user: dict = Depends(get_current_user)):
     """
     Get current user information with tenant and role details
     """
-    print(f"Current user data from token: {current_user}")
     
     # Get the user ID directly from the token
     user_id = current_user.get("_id")
@@ -76,19 +75,16 @@ async def read_users_me(current_user: dict = Depends(get_current_user)):
             detail="Invalid user identification in token"
         )
     
-    print(f"Looking for user with ID from token: {user_id}")
     
     # Query using the ID from the token, not from the URL
     user = await users_repo.find_one({"_id": user_id})
     
     if not user:
-        print(f"User with ID {user_id} not found in database")
         raise HTTPException(
             status_code=404, 
             detail=f"User with ID {user_id} not found in database"
         )
     
-    print(f"User found: {user.get('username')}")
     role = await roles_repo.find_one({"_id": user.get("role_id")}) if user.get("role_id") else None
     
     # Return the user details

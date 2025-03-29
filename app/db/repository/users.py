@@ -6,7 +6,6 @@ class UsersRepository:
         self.collection = get_db()["users"]
 
     async def find_one(self, filter_dict):
-        print(f"UsersRepository.find_one called with filter: {filter_dict}")
         
         # Check if we need to convert UUID string to UUID object
         if "_id" in filter_dict and isinstance(filter_dict["_id"], str):
@@ -34,14 +33,11 @@ class UsersRepository:
                         
                         # Log the entire query result for diagnosis
                         if not user:
-                            print("User not found. Checking all users in the collection...")
                             cursor = self.collection.find({}, {"_id": 1, "username": 1}).limit(5)
                             sample_users = await cursor.to_list(length=5)
-                            print(f"Sample users in the collection: {sample_users}")
                 
                 return user
             except Exception as e:
-                print(f"Error in find_one when processing ID: {str(e)}")
                 # Fall back to regular query
                 return await self.collection.find_one(filter_dict)
         else:
