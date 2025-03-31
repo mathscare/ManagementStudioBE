@@ -17,5 +17,4 @@ class Tag(BaseModel):
     name: str
     type: Optional[str] = "default"
     tenant_id: UUID
-    files: List[UUID] = []
 

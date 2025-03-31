@@ -64,14 +64,6 @@ async def upload_file(
             
             if existing_tag:
                 tag_id = existing_tag["_id"]
-                # Update tag with new file reference
-                files = existing_tag.get("files", [])
-                if file_id not in files:
-                    files.append(file_id)
-                await tags_repo.update_one(
-                    {"_id": tag_id},
-                    {"files": files}
-                )
             else:
                 # Create new tag
                 tag_id = str(uuid4())
@@ -79,8 +71,7 @@ async def upload_file(
                     "_id": tag_id,
                     "name": tag_name,
                     "type": tag_type,
-                    "tenant_id": tenant_id,
-                    "files": [file_id]
+                    "tenant_id": tenant_id
                 })
             
             # Add tag to file record
@@ -168,14 +159,12 @@ async def search_files(
                     "tenant_id": tenant_id
                 })
                 
-                if tags:
-                    # Get file IDs from these tags
-                    file_ids = []
-                    for tag in tags:
-                        file_ids.extend(tag.get("files", []))
-                    
-                    if file_ids:
-                        type_tag_conditions.append({"_id": {"$in": file_ids}})
+                # Get tag IDs
+                tag_ids = [tag["_id"] for tag in tags]
+                
+                # Find files that have these tag IDs
+                if tag_ids:
+                    type_tag_conditions.append({"tags": {"$in": tag_ids}})
         
         if type_tag_conditions:
             if require_all:
@@ -226,13 +215,10 @@ async def search_files(
         })
         
         if tags:
-            # Get all file IDs from these tags
-            file_ids = []
-            for tag in tags:
-                file_ids.extend(tag.get("files", []))
-            
-            if file_ids:
-                search_query["_id"] = {"$in": file_ids}
+            # Get tag IDs
+            tag_ids = [tag["_id"] for tag in tags]
+            # Find files that have any of these tag IDs
+            search_query["tags"] = {"$in": tag_ids}
     
     # Filter by tag names
     if tag_names:
@@ -243,19 +229,17 @@ async def search_files(
         })
         
         if tags:
-            # Get all file IDs from these tags
-            file_ids = []
-            for tag in tags:
-                file_ids.extend(tag.get("files", []))
+            # Get tag IDs
+            tag_ids = [tag["_id"] for tag in tags]
             
-            if file_ids:
-                if "_id" in search_query:
-                    # Intersect with existing file IDs
-                    existing_ids = search_query["_id"]["$in"]
-                    file_ids = [id for id in file_ids if id in existing_ids]
-                    search_query["_id"] = {"$in": file_ids}
-                else:
-                    search_query["_id"] = {"$in": file_ids}
+            if "tags" in search_query:
+                # Intersect with existing tag filter
+                existing_ids = search_query["tags"]["$in"]
+                tag_ids = [id for id in tag_ids if id in existing_ids]
+                search_query["tags"] = {"$in": tag_ids}
+            else:
+                # Set new tag filter
+                search_query["tags"] = {"$in": tag_ids}
     
     # Get files matching the criteria
     files = await files_repo.find_many(search_query, limit=limit, skip=offset)
@@ -389,18 +373,6 @@ async def update_file_tags(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    # Get current tag IDs
-    current_tag_ids = file.get("tags", [])
-    
-    # Remove file reference from current tags
-    for tag_id in current_tag_ids:
-        tag = await tags_repo.find_one({"_id": tag_id})
-        if tag and "files" in tag:
-            files = tag["files"]
-            if file_id in files:
-                files.remove(file_id)
-                await tags_repo.update_one({"_id": tag_id}, {"files": files})
-    
     # Process new tags
     new_tag_ids = []
     for tag_type, tag_names in tag_input.tags.items():
@@ -414,11 +386,6 @@ async def update_file_tags(
             
             if existing_tag:
                 tag_id = existing_tag["_id"]
-                # Add file reference to tag
-                files = existing_tag.get("files", [])
-                if file_id not in files:
-                    files.append(file_id)
-                    await tags_repo.update_one({"_id": tag_id}, {"files": files})
             else:
                 # Create new tag
                 tag_id = str(uuid4())
@@ -426,8 +393,7 @@ async def update_file_tags(
                     "_id": tag_id,
                     "name": tag_name,
                     "type": tag_type,
-                    "tenant_id": tenant_id,
-                    "files": [file_id]
+                    "tenant_id": tenant_id
                 })
             
             new_tag_ids.append(tag_id)
@@ -436,7 +402,7 @@ async def update_file_tags(
     await files_repo.update_one({"_id": file_id}, {"tags": new_tag_ids})
     
     # Return updated file with only tag IDs to match the FileOut schema
-    updated_file = await files_repo.files_with_tags(tenant_id=tenant_id, limit=1, skip=0,id=file_id)
+    updated_file = await files_repo.files_with_tags(tenant_id=tenant_id, limit=1, skip=0, id=file_id)
     
     return {
         "id": updated_file["_id"],
@@ -453,13 +419,6 @@ async def delete_file(file_id: str, current_user: dict = Depends(get_current_use
     
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
-    
-    # Remove file from all tags
-    for tag_id in file.get("tags", []):
-        tag = await tags_repo.find_one({"_id": tag_id})
-        if tag and "files" in tag and file_id in tag["files"]:
-            updated_files = [f for f in tag["files"] if f != file_id]
-            await tags_repo.update_one({"_id": tag_id}, {"files": updated_files})
     
     # Delete file from S3
     try:
@@ -485,17 +444,9 @@ async def export_files_to_csv(
         # Find all tags of the specified type
         tags = await tags_repo.find_many({"type": tag_type, "tenant_id": tenant_id})
         if tags:
-            # Get all file IDs from these tags
-            file_ids = []
-            for tag in tags:
-                file_ids.extend(tag.get("files", []))
-            
-            # Only get files that are in this list
-            if file_ids:
-                query["_id"] = {"$in": file_ids}
-            else:
-                # No files match this tag type
-                query["_id"] = {"$in": []}
+            # Get tag IDs and find files that have these tags
+            tag_ids = [tag["_id"] for tag in tags]
+            query["tags"] = {"$in": tag_ids}
     
     # Get files from database
     files = await files_repo.find_many(query)

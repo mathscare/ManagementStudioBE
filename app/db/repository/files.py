@@ -61,6 +61,8 @@ class FilesRepository:
                 }
             }}
         ])
+
         if sort:
             pipeline.insert(1, {"$sort": sort})
-        return await self.aggregate(pipeline)
+        result = await self.aggregate(pipeline)
+        return result[0] if id and result else result
