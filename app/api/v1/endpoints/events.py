@@ -126,9 +126,26 @@ async def get_events(
     limit: int = Query(100, ge=1),
     sort_field: Optional[str] = Query(None, description="Field to sort by"),
     sort_order: Optional[int] = Query(1, description="Sort order: 1 for ascending, -1 for descending"),
+    search: Optional[str] = Query(None, description="Search in event name, institute name, and location"),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     tenant_id = current_user["tenant_id"]
+    
+    # Build base query
+    query = {"tenant_id": tenant_id}
+    
+    # Add search filter if provided
+    if search:
+        query = {
+            "$and": [
+                {"tenant_id": tenant_id},
+                {"$or": [
+                    {"event_name": {"$regex": search, "$options": "i"}},
+                    {"institute_name": {"$regex": search, "$options": "i"}},
+                    {"location": {"$regex": search, "$options": "i"}}
+                ]}
+            ]
+        }
     
     # Build sort parameters if provided
     sort_params = None
@@ -137,7 +154,7 @@ async def get_events(
     
     # Use the updated repository method with pagination and sorting
     events = await events_repo.find_many(
-        {"tenant_id": tenant_id},
+        query,
         skip=offset,
         limit=limit,
         sort=sort_params
