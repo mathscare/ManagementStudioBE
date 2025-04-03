@@ -120,20 +120,27 @@ async def add_event_attachments(
     return Event(**updated_event)
 
 
-
 @router.get("/", response_model=List[Event])
 async def get_events(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1),
+    sort_field: Optional[str] = Query(None, description="Field to sort by"),
+    sort_order: Optional[int] = Query(1, description="Sort order: 1 for ascending, -1 for descending"),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     tenant_id = current_user["tenant_id"]
     
-    # Use the updated repository method with pagination
+    # Build sort parameters if provided
+    sort_params = None
+    if sort_field:
+        sort_params = [(sort_field, sort_order)]
+    
+    # Use the updated repository method with pagination and sorting
     events = await events_repo.find_many(
         {"tenant_id": tenant_id},
         skip=offset,
-        limit=limit
+        limit=limit,
+        sort=sort_params
     )
     
     # Format for response
