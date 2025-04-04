@@ -66,3 +66,31 @@ class FilesRepository:
             pipeline.insert(1, {"$sort": sort})
         result = await self.aggregate(pipeline)
         return result[0] if id and result else result
+
+    async def files_by_tag_ids(self, tenant_id, tag_ids, skip=0, limit=10, sort=None):
+        pipeline = [
+            {"$match": {
+                "tenant_id": tenant_id,
+                "tags": {"$all": tag_ids}
+            }},
+            {"$skip": skip},
+            {"$limit": limit},
+            {"$lookup": {
+                "from": "tags",
+                "localField": "tags",
+                "foreignField": "_id",
+                "as": "tag_details"
+            }},
+            {"$project": {
+                "_id": 1,
+                "file_name": 1,
+                "created_at": 1,
+                "s3_key": 1,
+                "tag_details": 1
+            }}
+        ]
+        
+        if sort:
+            pipeline.insert(1, {"$sort": sort})
+            
+        return await self.aggregate(pipeline)

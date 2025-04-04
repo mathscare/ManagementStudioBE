@@ -131,146 +131,52 @@ async def get_files(
     
     return result
 
-@router.get("/files/search", response_model=List[FileOut])
-async def search_files(
-    query: str = None,
-    tag_types: List[str] = Query(None),
-    tag_names: List[str] = Query(None),
-    type_tag_pairs: str = Query(None),
-    require_all: bool = False,
+@router.get("/files/by-tags", response_model=List[Dict])  # Changed to Dict as we're modifying the structure
+async def get_files_by_tags(
+    tag_ids: List[str] = Query(..., description="List of tag IDs to filter by"),
     offset: int = 0,
     limit: int = Query(default=10, le=100),
     current_user: dict = Depends(get_current_user)
 ):
     tenant_id = current_user.get("tenant_id")
     
-    # Handle type-tag pairs if provided
-    if type_tag_pairs:
-        pairs = [pair.strip() for pair in type_tag_pairs.split(",")]
-        type_tag_conditions = []
-        
-        for pair in pairs:
-            if ":" in pair:
-                tag_type, tag_name = pair.split(":", 1)
-                # Find tags matching the criteria
-                tags = await tags_repo.find_many({
-                    "type": tag_type.strip(),
-                    "name": tag_name.strip(),
-                    "tenant_id": tenant_id
-                })
-                
-                # Get tag IDs
-                tag_ids = [tag["_id"] for tag in tags]
-                
-                # Find files that have these tag IDs
-                if tag_ids:
-                    type_tag_conditions.append({"tags": {"$in": tag_ids}})
-        
-        if type_tag_conditions:
-            if require_all:
-                # All conditions must be met (intersection of file sets)
-                pipeline = [
-                    {"$match": {"tenant_id": tenant_id}},
-                    {"$match": {"$and": type_tag_conditions}},
-                    {"$skip": offset},
-                    {"$limit": limit}
-                ]
-            else:
-                # Any condition can be met (union of file sets)
-                pipeline = [
-                    {"$match": {"tenant_id": tenant_id}},
-                    {"$match": {"$or": type_tag_conditions}},
-                    {"$skip": offset},
-                    {"$limit": limit}
-                ]
-                
-            files = await files_repo.aggregate(pipeline)
-            
-            # Format the response with tag IDs only to match the FileOut schema
-            result = []
-            for file in files:
-                result.append({
-                    "id": file["_id"],
-                    "file_name": file["file_name"],
-                    "s3_key": file["s3_key"],
-                    "created_at": file["created_at"],
-                    "tags": file.get("tags", [])  # Leave as list of tag IDs
-                })
-            
-            return result
-    
-    # Standard query
-    search_query = {"tenant_id": tenant_id}
-    
-    # Add filename search if query is provided
-    if query:
-        search_query["file_name"] = {"$regex": query, "$options": "i"}
-    
-    # Filter by tag types
-    if tag_types:
-        # Find all tags of the given types
-        tags = await tags_repo.find_many({
-            "type": {"$in": tag_types},
-            "tenant_id": tenant_id
-        })
-        
-        if tags:
-            # Get tag IDs
-            tag_ids = [tag["_id"] for tag in tags]
-            # Find files that have any of these tag IDs
-            search_query["tags"] = {"$in": tag_ids}
-    
-    # Filter by tag names
-    if tag_names:
-        # Find all tags with the given names
-        tags = await tags_repo.find_many({
-            "name": {"$in": tag_names},
-            "tenant_id": tenant_id
-        })
-        
-        if tags:
-            # Get tag IDs
-            tag_ids = [tag["_id"] for tag in tags]
-            
-            if "tags" in search_query:
-                # Intersect with existing tag filter
-                existing_ids = search_query["tags"]["$in"]
-                tag_ids = [id for id in tag_ids if id in existing_ids]
-                search_query["tags"] = {"$in": tag_ids}
-            else:
-                # Set new tag filter
-                search_query["tags"] = {"$in": tag_ids}
-    
-    # Get files matching the criteria
-    files = await files_repo.find_many(search_query, limit=limit, skip=offset)
+    # Use the repository method to get files with tag details
+    files = await files_repo.files_by_tag_ids(
+        tenant_id=tenant_id, 
+        tag_ids=tag_ids,
+        skip=offset,
+        limit=limit
+    )
     
     result = []
     for file in files:
+        # Group tags by type
+        tags_by_type = {}
+        
+        # First collect all tags by their type
+        for tag in file.get("tag_details", []):
+            tag_type = tag.get("type", "default")
+            if tag_type not in tags_by_type:
+                tags_by_type[tag_type] = []
+                
+            # Add the tag with id as key, name as value
+            tags_by_type[tag_type].append({tag["_id"]: tag["name"]})
+        
+        # Now format tags as requested
+        formatted_tags = []
+        for tag_type, tags in tags_by_type.items():
+            # Always use array format for all tag types
+            formatted_tags.append({tag_type: tags})
+        
         result.append({
             "id": file["_id"],
             "file_name": file["file_name"],
             "s3_key": file["s3_key"],
             "created_at": file["created_at"],
-            "tags": file.get("tags", [])  # Return tag IDs only
+            "tags": formatted_tags
         })
     
     return result
-
-@router.get("/tags", response_model=List[TagOut])
-async def get_tags(
-    offset: int = 0,
-    limit: int = Query(default=50, le=200),
-    current_user: dict = Depends(get_current_user)
-):
-    tenant_id = current_user.get("tenant_id")
-    tags = await tags_repo.find_many({"tenant_id": tenant_id}, limit=limit, skip=offset)
-    return [
-        {
-            "id": tag["_id"],
-            "name": tag["name"],
-            "type": tag.get("type", "default")
-        } for tag in tags
-    ]
 
 @router.get("/tags/{tag_type}", response_model=List[TagOut])
 async def get_tags_by_type(
@@ -293,19 +199,6 @@ async def get_tags_by_type(
         } for tag in tags
     ]
 
-@router.get("/tag_types", response_model=List[str])
-async def get_tag_types(
-    current_user: dict = Depends(get_current_user)
-):
-    tenant_id = current_user.get("tenant_id")
-    pipeline = [
-        {"$match": {"tenant_id": tenant_id}},
-        {"$group": {"_id": "$type"}},
-        {"$project": {"type": "$_id", "_id": 0}}
-    ]
-    
-    result = await tags_repo.aggregate(pipeline)
-    return [item.get("type") for item in result if item.get("type")]
 
 @router.get("/tags/suggestions", response_model=List[TagOut])
 async def tag_suggestions(
