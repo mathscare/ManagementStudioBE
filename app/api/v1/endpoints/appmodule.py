@@ -200,57 +200,24 @@ async def get_tags_by_type(
     ]
 
 
-@router.get("/tags/suggestions", response_model=List[TagOut])
+@router.get("/tags-suggestions", response_model=List[TagOut])
 async def tag_suggestions(
-    query: str = Query(..., min_length=1),
-    tag_type: str = None,
+    query: str = Query(...),
     offset: int = 0,
     limit: int = Query(default=10, le=50),
     current_user: dict = Depends(get_current_user)
 ):
     tenant_id = current_user.get("tenant_id")
-    
-    # Base query
     find_query = {"tenant_id": tenant_id}
-    
-    # Add type filter if provided
-    if tag_type:
-        find_query["type"] = tag_type
-    
-    # For short queries, use regex
-    if len(query) < 3:
-        find_query["name"] = {"$regex": f".*{query}.*", "$options": "i"}
-        tags = await tags_repo.find_many(find_query, limit=limit, skip=offset)
-        return [
-            {
-                "id": tag["_id"],
-                "name": tag["name"],
-                "type": tag.get("type", "default")
-            } for tag in tags
-        ]
-    
-    # For longer queries, do fuzzy matching
-    all_tags = await tags_repo.find_many(find_query)
-    
-    # Calculate fuzzy matches
-    fuzzy_matches = []
-    for tag in all_tags:
-        score = fuzz.ratio(tag["name"].lower(), query.lower())
-        if score >= 60:  # Threshold for relevance
-            fuzzy_matches.append((tag, score))
-    
-    # Sort by score, highest first
-    fuzzy_matches.sort(key=lambda x: x[1], reverse=True)
-    
-    # Paginate results
-    paginated_matches = fuzzy_matches[offset:offset + limit]
-    
+
+    find_query["name"] = {"$regex": f"{query}", "$options": "i"}
+    tags = await tags_repo.find_many(find_query, limit=limit, skip=offset)
     return [
         {
             "id": tag["_id"],
             "name": tag["name"],
             "type": tag.get("type", "default")
-        } for tag, score in paginated_matches
+        } for tag in tags
     ]
 
 @router.put("/files/{file_id}/tags", response_model=FileOut)
