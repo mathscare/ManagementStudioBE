@@ -203,15 +203,22 @@ async def get_tags_by_type(
 @router.get("/tags-suggestions", response_model=List[TagOut])
 async def tag_suggestions(
     query: str = Query(...),
+    tag_ids: Optional[List[str]] = Query(None, description="List of tag IDs to filter by"),
     offset: int = 0,
     limit: int = Query(default=10, le=50),
     current_user: dict = Depends(get_current_user)
 ):
     tenant_id = current_user.get("tenant_id")
-    find_query = {"tenant_id": tenant_id}
-
-    find_query["name"] = {"$regex": f"{query}", "$options": "i"}
-    tags = await tags_repo.find_many(find_query, limit=limit, skip=offset)
+    
+    # Use the new repository method with a single pipeline
+    tags = await tags_repo.get_tag_suggestions(
+        tenant_id=tenant_id,
+        query=query,
+        tag_ids=tag_ids,
+        skip=offset,
+        limit=limit
+    )
+    
     return [
         {
             "id": tag["_id"],
