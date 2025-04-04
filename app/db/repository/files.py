@@ -29,21 +29,37 @@ class FilesRepository:
     async def aggregate(self, pipeline):
         return [doc async for doc in self.collection.aggregate(pipeline)]
 
-    async def files_with_tags(self, tenant_id, skip=0, limit=10, sort=None,id=None):
+    async def files_with_tags(self, tenant_id, skip=0, limit=10, sort=None, id=None):
         pipeline = []
         if id:
             pipeline.append({"$match": {"_id": id}})
-        pipeline.extend([
-            {"$match": {"tenant_id": tenant_id}},
-            {"$skip": skip},
-            {"$limit": limit},
-            {"$lookup": {
+        
+        # Match by tenant_id
+        pipeline.append({"$match": {"tenant_id": tenant_id}})
+        
+        # Sort by created_at descending (newest first) by default
+        if sort:
+            pipeline.append({"$sort": sort})
+        else:
+            pipeline.append({"$sort": {"created_at": -1}})
+            
+        # Pagination
+        pipeline.append({"$skip": skip})
+        pipeline.append({"$limit": limit})
+        
+        # Lookup to get tag details
+        pipeline.append({
+            "$lookup": {
                 "from": "tags",
                 "localField": "tags",
                 "foreignField": "_id",
                 "as": "tag_details"
-            }},
-            {"$project": {
+            }
+        })
+        
+        # Project the desired fields
+        pipeline.append({
+            "$project": {
                 "_id": 1,
                 "file_name": 1,
                 "created_at": 1,
@@ -59,11 +75,66 @@ class FilesRepository:
                         }
                     }
                 }
-            }}
-        ])
+            }
+        })
+        
+        result = await self.aggregate(pipeline)
+        return result[0] if id and result else result
 
-        if sort:
-            pipeline.insert(1, {"$sort": sort})
+    async def files_with_tags_by_type(self, tenant_id, tag_type, skip=0, limit=10, id=None):
+        pipeline = []
+        
+        if id:
+            pipeline.append({"$match": {"_id": id}})
+            
+        # Match by tenant_id
+        pipeline.append({"$match": {"tenant_id": tenant_id}})
+        
+        # Lookup to get tag details
+        pipeline.append({
+            "$lookup": {
+                "from": "tags",
+                "localField": "tags",
+                "foreignField": "_id",
+                "as": "tag_details"
+            }
+        })
+        
+        # Filter files that have at least one tag of the specified type
+        pipeline.append({
+            "$match": {
+                "tag_details.type": tag_type
+            }
+        })
+        
+        # Sort by created_at descending (newest first)
+        pipeline.append({"$sort": {"created_at": -1}})
+        
+        # Pagination
+        pipeline.append({"$skip": skip})
+        pipeline.append({"$limit": limit})
+        
+        # Project the desired fields
+        pipeline.append({
+            "$project": {
+                "_id": 1,
+                "file_name": 1,
+                "created_at": 1,
+                "s3_key": 1,
+                "tags": {
+                    "$map": {
+                        "input": "$tag_details",
+                        "as": "tag",
+                        "in": {
+                            "id": "$$tag._id",
+                            "name": "$$tag.name",
+                            "type": "$$tag.type"
+                        }
+                    }
+                }
+            }
+        })
+        
         result = await self.aggregate(pipeline)
         return result[0] if id and result else result
 

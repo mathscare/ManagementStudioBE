@@ -111,13 +111,28 @@ async def download_file(
 async def get_files(
     offset: int = 0,
     limit: int = Query(default=10, le=100),
-    tag: Optional[str] = None,
+    tag_type: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
     tenant_id = current_user.get("tenant_id")
     
-    files = await files_repo.files_with_tags(tenant_id=tenant_id, limit=limit, skip=offset)
-
+    # Call appropriate repository method based on whether tag_type is provided
+    if tag_type:
+        # Filter files by tag_type
+        files = await files_repo.files_with_tags_by_type(
+            tenant_id=tenant_id, 
+            tag_type=tag_type,
+            limit=limit, 
+            skip=offset
+        )
+    else:
+        # Get all files without tag type filtering
+        files = await files_repo.files_with_tags(
+            tenant_id=tenant_id, 
+            limit=limit, 
+            skip=offset,
+            sort={"created_at": -1}  # Sort by created_at descending (newest first)
+        )
     
     result = []
     for file in files:
@@ -135,7 +150,7 @@ async def get_files(
 async def get_files_by_tags(
     tag_ids: List[str] = Query(..., description="List of tag IDs to filter by"),
     offset: int = 0,
-    limit: int = Query(default=10, le=100),
+    limit: int = Query(default=10, le=1000),
     current_user: dict = Depends(get_current_user)
 ):
     tenant_id = current_user.get("tenant_id")
