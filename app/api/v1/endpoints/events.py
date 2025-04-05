@@ -1,17 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body, Query,Response,Form
 from typing import List, Optional, Dict, Any
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from uuid import uuid4
 from io import BytesIO
-
 from app.db.repository.events import EventsRepository
-from app.schemas.event import EventCreate, Event, EventUpdate, EventStatusUpdate
+from app.schemas.event import (
+    EventCreate, Event, EventUpdate, EventStatusUpdate,
+    EmailTextRequest, AIExtractedField, AIEventExtraction
+)
 from app.utils.s3 import upload_file_to_s3, delete_object, create_s3_bucket
 from app.utils.pdf_generator import generate_event_pdf
 from fastapi.responses import StreamingResponse
 from app.core.security import get_current_user
 from app.utils.csv_utils import generate_model_csv
+from pydantic import BaseModel
+from app.utils.openai_api import gpt
+from fastapi.responses import StreamingResponse
+from dateutil import parser as date_parser
 
 
 router = APIRouter()
@@ -456,3 +462,119 @@ async def delete_event_attachments(
     updated_event["id"] = updated_event.pop("_id")
     
     return Event(**updated_event)
+
+@router.post("/extract-from-email", response_model=AIEventExtraction)
+async def extract_event_from_email(
+    email_text: str = Form(..., description="Email text to extract event details from"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    try:
+        prompt = """
+        You are an AI assistant that extracts event information from emails.
+        Extract the following fields from the email text:
+        - event_name: Name of the event
+        - description: Description of the event
+        - event_date: Date of the event in YYYY-MM-DD format
+        - location: Location where the event will be held
+        - institute_name: Name of the institute/organization hosting the event
+        - contact_name: Name of the contact person
+        - contact_number: Phone number of the contact person
+        - email: Email address for contact
+        - website: Website of the event or institute (as a valid URL)
+        - expected_audience: Expected number of attendees as a number
+        - is_paid_event: Whether it's a paid event (true or false)
+        - fees: Fee amount if it's a paid event as a number
+        - payment_status: Current payment status
+        - travel_accomodation: Travel and accommodation details
+        - status: Current status of the event planning
+        
+        For each field, provide The extracted value or null if you can't extract it
+        
+        Respond with a JSON object that follows the specified schema.
+        """
+        
+        # Add the email text as user message
+        text = f"Email text: {email_text}"        
+        ai_extraction = await gpt.send_text(text=text, prompt=prompt, model=AIEventExtraction)
+        print(ai_extraction)
+        
+        event_data = {
+            "contact_name": None,
+            "contact_number": None,
+            "description": None,
+            "email": None,
+            "event_date": None,
+            "event_name": None,
+            "expected_audience": None,
+            "fees": None,
+            "institute_name": None,
+            "is_paid_event": None,
+            "location": None,
+            "payment_status": None,
+            "travel_accomodation": None,
+            "website": None,
+            "is_camera_man_hired": None,
+            "camera_man_name": None,
+            "camera_man_number": None
+        }
+        
+        # Check if ai_extraction is a dictionary or an object
+        if isinstance(ai_extraction, dict):
+            # Process as dictionary
+            for field in event_data:
+                if field in ai_extraction and ai_extraction[field] is not None:
+                    event_data[field] = ai_extraction[field]
+        else:
+            # Process as object with attributes
+            for field in event_data:
+                if hasattr(ai_extraction, field) and getattr(ai_extraction, field) is not None:
+                    event_data[field] = getattr(ai_extraction, field)
+        
+        try:
+            return AIEventExtraction(**event_data)
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"Invalid event data format: {str(e)}")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error extracting event information: {str(e)}")
+
+def convert_to_date(date_string: str) -> date:
+    """
+    Convert a string date to a date object.
+    Supports various date formats.
+    
+    Args:
+        date_string: String representing a date
+        
+    Returns:
+        date: A date object
+        
+    Raises:
+        ValueError: If the date string cannot be parsed
+    """
+    try:
+        # Try parsing with dateutil parser which handles many formats
+        parsed_date = date_parser.parse(date_string, fuzzy=True)
+        return parsed_date.date()
+    except Exception:
+        # If dateutil fails, try common formats manually
+        formats = [
+            "%Y-%m-%d",           # 2023-01-15
+            "%d/%m/%Y",           # 15/01/2023
+            "%m/%d/%Y",           # 01/15/2023
+            "%d-%m-%Y",           # 15-01-2023
+            "%d %B %Y",           # 15 January 2023
+            "%d %b %Y",           # 15 Jan 2023
+            "%B %d, %Y",          # January 15, 2023
+            "%b %d, %Y",          # Jan 15, 2023
+        ]
+        
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_string, fmt).date()
+            except ValueError:
+                continue
+        
+        # If all parsing attempts fail
+        raise ValueError(f"Could not parse date from: {date_string}")
+

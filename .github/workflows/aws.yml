@@ -37,7 +37,7 @@ jobs:
           echo "FILE_AWS_S3_BUCKET=${{ secrets.FILE_AWS_S3_BUCKET }}" >> $GITHUB_ENV
           echo "MONGO_URI=${{ secrets.MONGO_URI }}" >> $GITHUB_ENV
           echo "MONGO_DB_NAME=${{ secrets.MONGO_DB_NAME }}" >> $GITHUB_ENV
-
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
 
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@master
@@ -62,4 +62,5 @@ jobs:
             export TASKS_FILE_AWS_S3_BUCKET=${{ secrets.TASKS_FILE_AWS_S3_BUCKET }}
             export MONGO_URI=${{ secrets.MONGO_URI }}
             export MONGO_DB_NAME=${{ secrets.MONGO_DB_NAME }}
+            export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             sudo systemctl restart fastapi

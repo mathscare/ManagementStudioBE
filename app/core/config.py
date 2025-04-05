@@ -1,4 +1,5 @@
 # app/core/config.py
+import os
 from app.core.settings import settings
 
 SECRET_KEY = settings.secret_key
@@ -13,4 +14,4 @@ FILE_AWS_S3_BUCKET = settings.FILE_AWS_S3_BUCKET
 TASKS_FILE_AWS_S3_BUCKET = settings.TASKS_FILE_AWS_S3_BUCKET
 MONGO_URI = settings.MONGO_URI
 MONGO_DB_NAME = settings.MONGO_DB_NAME
-
+OPENAI_API_KEY = settings.OPENAI_API_KEY

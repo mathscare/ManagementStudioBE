@@ -5,7 +5,7 @@ import re
 import json
 from uuid import uuid4
 from fastapi import UploadFile
-from app.core.config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET, FILE_AWS_S3_BUCKET
+from app.core.config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Tuple
 from botocore.config import Config

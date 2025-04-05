@@ -23,3 +23,7 @@ redis
 aioboto3
 motor
 pymongo
+httpx
+python-dateutil
+openai
+aiofiles
