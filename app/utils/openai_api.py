@@ -20,7 +20,12 @@ class GPT():
         self.model = model
         self.__API_KEY = API_KEY
         self.voice_model = voice_model
-        self.http_client = aiohttp.ClientSession()
+        self.http_client = None  # Will initialize later
+
+    async def get_http_client(self):
+        if self.http_client is None or self.http_client.closed:
+            self.http_client = aiohttp.ClientSession()
+        return self.http_client
 
     async def send_text(self,text : str,prompt : str, model : BaseModel = None):
         try:
@@ -86,8 +91,9 @@ class GPT():
                 "response_format" : {"type": "json_object" }
                 }
             
+            client = await self.get_http_client()
 
-            async with self.http_client.post(url = "https://api.openai.com/v1/chat/completions", headers=headers, json=payload) as response:
+            async with client.post(url = "https://api.openai.com/v1/chat/completions", headers=headers, json=payload) as response:
                 if response.status != 200:
                     raise HTTPException(status_code=response.status, detail=f"API request failed with status code {response.status}")
                 response_data = await response.json()
@@ -147,8 +153,8 @@ class GPT():
                 for encoded_image in encoded_images
             ]
             payload['messages'][0]['content'].extend(image_payloads)
-            
-            async with self.http_client.post(url = "https://api.openai.com/v1/chat/completions", headers=headers, json=payload) as response:
+            client = await self.get_http_client()
+            async with client.post(url = "https://api.openai.com/v1/chat/completions", headers=headers, json=payload) as response:
                 if response.status != 200:
                     raise HTTPException(status_code=response.status, detail=f"API request failed with status code {response.status}")
                 response_data = await response.json()
