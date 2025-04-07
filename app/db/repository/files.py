@@ -157,6 +157,7 @@ class FilesRepository:
                 "file_name": 1,
                 "created_at": 1,
                 "s3_key": 1,
+                "s3_url": 1,
                 "tag_details": 1
             }}
         ]
