@@ -8,18 +8,18 @@ from uuid import uuid4
 from datetime import datetime, timedelta
 import json
 from app.utils.s3 import upload_file_to_s3, delete_object,generate_presigned_url
+from app.utils.video_utils import generate_video_thumbnail
 from fastapi.responses import StreamingResponse
 import io
 import csv
 from rapidfuzz import fuzz
+import asyncio
+import tempfile
+import os
 
 router = APIRouter()
 files_repo = FilesRepository()
 tags_repo = TagsRepository()
-
-"""
-Note: Buckets are now automatically created in the tenant creation process.
-"""
 
 @router.post("/upload", response_model=FileUploadResponse)
 async def upload_file(
@@ -52,6 +52,37 @@ async def upload_file(
         "tags": []
     }
     
+    # Check if file is a video and generate thumbnail
+    file_content_type = file.content_type or ""
+    file_extension = os.path.splitext(file.filename)[1].lower()
+    video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv']
+    video_content_types = ['video/mp4', 'video/x-msvideo', 'video/quicktime', 'video/webm', 'video/x-flv', 'video/x-ms-wmv']
+    
+    is_video = (file_content_type.startswith('video/') or 
+                file_content_type in video_content_types or 
+                file_extension in video_extensions)
+    
+    if is_video:
+        # Generate thumbnail using the utility function
+        thumbnail_result = await generate_video_thumbnail(file)
+        
+        if thumbnail_result:
+            thumbnail_data, content_type = thumbnail_result
+            
+            # Upload thumbnail to S3
+            thumbnail_key = f"{tenant_id}/{str(uuid4())}/thumbnail_{file.filename}.jpg"
+            
+            # Create upload file object for the thumbnail
+            thumbnail_upload = UploadFile(
+                filename=f"thumbnail_{file.filename}.jpg",
+                file=io.BytesIO(thumbnail_data),
+                content_type=content_type
+            )
+            
+            # Upload to S3
+            thumbnail_url = await upload_file_to_s3(thumbnail_upload, thumbnail_key, bucket_name)
+            file_record["thumbnail_url"] = thumbnail_url
+    
     # Process tags
     for tag_type, tag_list in tags_data.items():
         for tag_name in tag_list:
@@ -80,13 +111,19 @@ async def upload_file(
     # Save file record
     await files_repo.insert_one(file_record)
     
-    return {
+    response = {
         "id": file_id,
         "file_name": file.filename,
         "s3_key": s3_key,
         "s3_url": s3_url,
         "tags": file_record["tags"]
     }
+    
+    # Add thumbnail_url to response if available
+    if "thumbnail_url" in file_record:
+        response["thumbnail_url"] = file_record["thumbnail_url"]
+    
+    return response
 
 @router.get("/download/{file_id}")
 async def download_file(
