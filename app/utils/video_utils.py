@@ -3,7 +3,6 @@ import tempfile
 import asyncio
 from fastapi import UploadFile
 import io
-import shutil
 from typing import Optional, Tuple
 
 
@@ -29,6 +28,10 @@ async def generate_video_thumbnail(
     file_extension = os.path.splitext(file.filename)[1].lower()
     
     try:
+        # Create a copy of file content to avoid file handle issues
+        file.file.seek(0)
+        file_content = file.file.read()
+        
         # Create temporary directory to work in
         with tempfile.TemporaryDirectory() as temp_dir:
             # Create paths for temporary files
@@ -36,11 +39,8 @@ async def generate_video_thumbnail(
             temp_thumbnail_path = os.path.join(temp_dir, "thumbnail.jpg")
             
             # Save video to temporary file
-            file.file.seek(0)
-            content = file.file.read()
-            
             with open(temp_video_path, "wb") as temp_file:
-                temp_file.write(content)
+                temp_file.write(file_content)
             
             # Build ffmpeg command based on platform
             ffmpeg_cmd = [
@@ -76,8 +76,14 @@ async def generate_video_thumbnail(
         print(f"Error generating thumbnail: {str(e)}")
         return None
     finally:
-        # Reset the file pointer for potential reuse
-        file.file.seek(0)
+        # Reset the file pointer for potential reuse, but handle closed file errors
+        try:
+            file.file.seek(0)
+        except ValueError:
+            # File already closed, nothing to do
+            pass
+        except Exception as e:
+            print(f"Warning: Could not reset file pointer: {str(e)}")
 
 
 async def _is_ffmpeg_available() -> bool:
