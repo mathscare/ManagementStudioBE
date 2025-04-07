@@ -21,7 +21,7 @@ router = APIRouter()
 files_repo = FilesRepository()
 tags_repo = TagsRepository()
 
-@router.post("/upload", response_model=FileUploadResponse)
+@router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
     tags: str = Form("{}"),
@@ -98,6 +98,7 @@ async def upload_file(
             # Upload to S3
             thumbnail_url = await upload_file_to_s3(thumbnail_upload, thumbnail_key, bucket_name)
             file_record["thumbnail_url"] = thumbnail_url
+            print(f"Thumbnail uploaded to S3: {thumbnail_url}","file record",file_record)
     
     # Process tags
     for tag_type, tag_list in tags_data.items():
@@ -208,7 +209,6 @@ async def get_files_by_tags(
 ):
     tenant_id = current_user.get("tenant_id")
     
-    # Use the repository method to get files with tag details
     files = await files_repo.files_by_tag_ids(
         tenant_id=tenant_id, 
         tag_ids=tag_ids,
@@ -218,32 +218,33 @@ async def get_files_by_tags(
     
     result = []
     for file in files:
-        # Group tags by type
         tags_by_type = {}
         
-        # First collect all tags by their type
         for tag in file.get("tag_details", []):
             tag_type = tag.get("type", "default")
             if tag_type not in tags_by_type:
                 tags_by_type[tag_type] = []
                 
-            # Add the tag with id as key, name as value
             tags_by_type[tag_type].append({tag["_id"]: tag["name"]})
         
-        # Now format tags as requested
         formatted_tags = []
         for tag_type, tags in tags_by_type.items():
-            # Always use array format for all tag types
             formatted_tags.append({tag_type: tags})
         
-        result.append({
+        file_data = {
             "id": file["_id"],
             "file_name": file["file_name"],
             "s3_key": file["s3_key"],
             "s3_url": file["s3_url"],
             "created_at": file["created_at"],
             "tags": formatted_tags
-        })
+        }
+        
+        # Add thumbnail_url to response if it exists
+        if "thumbnail_url" in file:
+            file_data["thumbnail_url"] = file["thumbnail_url"]
+        
+        result.append(file_data)
     
     return result
 

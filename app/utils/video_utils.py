@@ -1,115 +1,57 @@
-import os
-import tempfile
+import av
+import io
 import asyncio
 from fastapi import UploadFile
-import io
 from typing import Optional, Tuple
-
 
 async def generate_video_thumbnail(
     file: UploadFile, 
-    timestamp: str = "00:00:01.000"
+    timestamp: float = 1.0  # timestamp in seconds
 ) -> Optional[Tuple[bytes, str]]:
     """
-    Generate a thumbnail from a video file.
+    Generate a thumbnail from video bytes using PyAV.
     
     Args:
-        file: The video file as UploadFile
-        timestamp: The timestamp to extract the thumbnail from (default: 1 second)
+        file: An UploadFile object with the video content.
+        timestamp: The time in seconds to capture the thumbnail (default: 1.0).
         
     Returns:
-        Tuple of (thumbnail_bytes, content_type) or None if failed
+        A tuple (thumbnail_bytes, content_type) or None if extraction fails.
     """
-    if not await _is_ffmpeg_available():
-        print("FFmpeg not available, cannot generate thumbnail")
-        return None
-    
-    file_extension = os.path.splitext(file.filename)[1].lower()
-    
-    # Get file content right away in a safe manner
-    file_content = None
     try:
-        # Only try to read the file if it's not already closed
-        if not file.file.closed:
-            file.file.seek(0)
-            file_content = file.file.read()
-        else:
-            print("Warning: File already closed before reading content")
-            return None
-    except Exception as e:
-        print(f"Error reading upload file: {str(e)}")
-        return None
-    
-    if not file_content:
-        print("No file content available")
-        return None
+        # Read the video content from the UploadFile
+        file_content = await file.read()
         
-    try:
-        # Create temporary directory to work in
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Create paths for temporary files
-            temp_video_path = os.path.join(temp_dir, f"video{file_extension}")
-            temp_thumbnail_path = os.path.join(temp_dir, "thumbnail.jpg")
-            
-            # Save video to temporary file
-            with open(temp_video_path, "wb") as temp_file:
-                temp_file.write(file_content)
-            
-            # Build ffmpeg command based on platform
-            ffmpeg_cmd = [
-                "ffmpeg", 
-                "-i", temp_video_path,
-                "-ss", timestamp,
-                "-vframes", "1",
-                "-y",  # Overwrite output files without asking
-                temp_thumbnail_path
-            ]
-            
-            # Run ffmpeg command
-            process = await asyncio.create_subprocess_exec(
-                *ffmpeg_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            # Wait for the process to complete
-            stdout, stderr = await process.communicate()
-            
-            # Check if thumbnail was created
-            if os.path.exists(temp_thumbnail_path) and os.path.getsize(temp_thumbnail_path) > 0:
-                # Read the thumbnail file
-                with open(temp_thumbnail_path, "rb") as f:
-                    thumbnail_data = f.read()
-                return thumbnail_data, "image/jpeg"
-            else:
-                print(f"FFmpeg stderr: {stderr.decode()}")
+        # Wrap the synchronous PyAV thumbnail extraction in a thread
+        def extract_thumbnail() -> Optional[bytes]:
+            try:
+                # Open the video stream from in-memory bytes
+                container = av.open(io.BytesIO(file_content))
+                # Seek to the desired timestamp (converted to microseconds)
+                container.seek(int(timestamp * 1_000_000))
+                
+                # Decode video frames and return the first available frame
+                for frame in container.decode(video=0):
+                    # Convert the frame to a PIL image
+                    image = frame.to_image()
+                    # Save the image to a BytesIO buffer as JPEG
+                    buf = io.BytesIO()
+                    image.save(buf, format="JPEG")
+                    return buf.getvalue()
+                # No frame was decoded
                 return None
-    
-    except Exception as e:
-        print(f"Error generating thumbnail: {str(e)}")
-        return None
-    
-    # No need for finally block trying to reset file pointer
-    # as we've already read all the content at the beginning
+            except Exception as inner_e:
+                print(f"PyAV extraction error: {inner_e}")
+                return None
 
-
-async def _is_ffmpeg_available() -> bool:
-    """Check if ffmpeg is available in the system."""
-    try:
-        if os.name == "nt":
-            # Explicitly invoke cmd to use correct 'where'
-            command = ["cmd", "/c", "where", "ffmpeg"]
+        thumbnail_data = await asyncio.to_thread(extract_thumbnail)
+        
+        if thumbnail_data:
+            return thumbnail_data, "image/jpeg"
         else:
-            command = ["which", "ffmpeg"]
+            print("No thumbnail generated using PyAV.")
+            return None
 
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-
-        stdout, stderr = await process.communicate()
-        return process.returncode == 0
     except Exception as e:
-        print(f"Error checking for ffmpeg: {str(e)}")
-        return False
+        print(f"Error generating thumbnail with PyAV: {e}")
+        return None
