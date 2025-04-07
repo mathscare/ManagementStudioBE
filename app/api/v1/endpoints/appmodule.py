@@ -30,15 +30,36 @@ async def upload_file(
     tenant_id = current_user.get("tenant_id")
     bucket_name = f"AWS_S3_BUCKET_{tenant_id}"
     
+        # Check if file is a video and generate thumbnail
+    file_content_type = file.content_type or ""
+    file_extension = os.path.splitext(file.filename)[1].lower()
+    video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv']
+    video_content_types = ['video/mp4', 'video/x-msvideo', 'video/quicktime', 'video/webm', 'video/x-flv', 'video/x-ms-wmv']
+    
     # Parse tags from form data
     try:
         tags_data = json.loads(tags)
     except json.JSONDecodeError:
         tags_data = {}
+        
+    # Read file content once
+    file_content = await file.read()
+    
+    # Create a new UploadFile-like object for S3 upload
+    file_for_s3 = UploadFile(
+        filename=file.filename,
+        file=io.BytesIO(file_content),
+    )
+    
+    # Create a new UploadFile-like object for thumbnail generation
+    file_for_thumbnail = UploadFile(
+        filename=file.filename,
+        file=io.BytesIO(file_content),
+    )
     
     # Upload file to S3
     s3_key = f"{tenant_id}/{str(uuid4())}/{file.filename}"
-    s3_url = await upload_file_to_s3(file, s3_key, bucket_name)
+    s3_url = await upload_file_to_s3(file_for_s3, s3_key, bucket_name)
     
     # Create file record
     file_id = str(uuid4())
@@ -52,19 +73,15 @@ async def upload_file(
         "tags": []
     }
     
-    # Check if file is a video and generate thumbnail
-    file_content_type = file.content_type or ""
-    file_extension = os.path.splitext(file.filename)[1].lower()
-    video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv']
-    video_content_types = ['video/mp4', 'video/x-msvideo', 'video/quicktime', 'video/webm', 'video/x-flv', 'video/x-ms-wmv']
-    
+
     is_video = (file_content_type.startswith('video/') or 
                 file_content_type in video_content_types or 
                 file_extension in video_extensions)
     
     if is_video:
-        # Generate thumbnail using the utility function
-        thumbnail_result = await generate_video_thumbnail(file)
+                
+        thumbnail_result = await generate_video_thumbnail(file_for_thumbnail)
+        
         
         if thumbnail_result:
             thumbnail_data, content_type = thumbnail_result
@@ -76,7 +93,6 @@ async def upload_file(
             thumbnail_upload = UploadFile(
                 filename=f"thumbnail_{file.filename}.jpg",
                 file=io.BytesIO(thumbnail_data),
-                content_type=content_type
             )
             
             # Upload to S3

@@ -20,18 +20,31 @@ async def generate_video_thumbnail(
     Returns:
         Tuple of (thumbnail_bytes, content_type) or None if failed
     """
-    # Check if ffmpeg is installed
     if not await _is_ffmpeg_available():
         print("FFmpeg not available, cannot generate thumbnail")
         return None
     
     file_extension = os.path.splitext(file.filename)[1].lower()
     
+    # Get file content right away in a safe manner
+    file_content = None
     try:
-        # Create a copy of file content to avoid file handle issues
-        file.file.seek(0)
-        file_content = file.file.read()
+        # Only try to read the file if it's not already closed
+        if not file.file.closed:
+            file.file.seek(0)
+            file_content = file.file.read()
+        else:
+            print("Warning: File already closed before reading content")
+            return None
+    except Exception as e:
+        print(f"Error reading upload file: {str(e)}")
+        return None
+    
+    if not file_content:
+        print("No file content available")
+        return None
         
+    try:
         # Create temporary directory to work in
         with tempfile.TemporaryDirectory() as temp_dir:
             # Create paths for temporary files
@@ -75,30 +88,28 @@ async def generate_video_thumbnail(
     except Exception as e:
         print(f"Error generating thumbnail: {str(e)}")
         return None
-    finally:
-        # Reset the file pointer for potential reuse, but handle closed file errors
-        try:
-            file.file.seek(0)
-        except ValueError:
-            # File already closed, nothing to do
-            pass
-        except Exception as e:
-            print(f"Warning: Could not reset file pointer: {str(e)}")
+    
+    # No need for finally block trying to reset file pointer
+    # as we've already read all the content at the beginning
 
 
 async def _is_ffmpeg_available() -> bool:
     """Check if ffmpeg is available in the system."""
     try:
-        # Use 'where' on Windows and 'which' on Unix-like systems
-        command = "where" if os.name == "nt" else "which"
-        
+        if os.name == "nt":
+            # Explicitly invoke cmd to use correct 'where'
+            command = ["cmd", "/c", "where", "ffmpeg"]
+        else:
+            command = ["which", "ffmpeg"]
+
         process = await asyncio.create_subprocess_exec(
-            command, "ffmpeg",
+            *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        
-        await process.communicate()
+
+        stdout, stderr = await process.communicate()
         return process.returncode == 0
-    except Exception:
+    except Exception as e:
+        print(f"Error checking for ffmpeg: {str(e)}")
         return False
