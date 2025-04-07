@@ -187,6 +187,7 @@ async def get_files_by_tags(
             "id": file["_id"],
             "file_name": file["file_name"],
             "s3_key": file["s3_key"],
+            "s3_url": file["s3_url"],
             "created_at": file["created_at"],
             "tags": formatted_tags
         })
