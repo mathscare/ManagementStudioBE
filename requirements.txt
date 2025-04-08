@@ -27,3 +27,4 @@ httpx
 python-dateutil
 openai
 aiofiles
+av
