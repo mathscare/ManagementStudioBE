@@ -5,11 +5,25 @@ client = AsyncIOMotorClient(MONGO_URI)  # Initialize the MongoDB client globally
 db = client[MONGO_DB_NAME]  # Get the database instance
 
 async def ensure_collections_exist():
-    required_collections = ["users", "tenants", "roles", "organizations", "permissions", "files", "tags", "events", "tasks"]
+    """Ensure all required collections exist in the database."""
     existing_collections = await db.list_collection_names()
-    for collection_name in required_collections:
-        if collection_name not in existing_collections:
-            await db.create_collection(collection_name)
+    
+    required_collections = [
+        "users", 
+        "tenants", 
+        "roles", 
+        "permissions", 
+        "events",
+        "tasks",
+        "files",
+        "tags",
+        "emails"  # Add emails collection
+    ]
+    
+    for collection in required_collections:
+        if collection not in existing_collections:
+            await db.create_collection(collection)
+            print(f"Created collection: {collection}")
 
 def get_db():
     return db

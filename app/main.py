@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 import app.models
-from app.api.v1.endpoints import appmodule as app_endpoint, auth, user, events, tenant, tasks, maps
+from app.api.v1.endpoints import appmodule as app_endpoint, auth, user, events, tenant, tasks, maps, emails
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from typing import List
@@ -33,4 +33,5 @@ app.include_router(events.router, prefix="/events", tags=["Events"])
 app.include_router(app_endpoint.router, prefix="/app", tags=["App"])
 app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 app.include_router(maps.router, prefix="/maps", tags=["Maps"])
+app.include_router(emails.router, prefix="/emails", tags=["Emails"])
 
