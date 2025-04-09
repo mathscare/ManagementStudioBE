@@ -76,9 +76,8 @@ async def receive_email(
                     email_dict["attachments"][i]["s3_key"] = s3_key
                     email_dict["attachments"][i]["s3_url"] = s3_url
                     
-                    # Optionally remove the base64 content to reduce database size
-                    # Uncomment to enable - removes content after upload to S3
-                    # email_dict["attachments"][i]["content"] = None
+                    # Remove the base64 content to save database space
+                    email_dict["attachments"][i]["content"] = None
                     
                 except Exception as e:
                     logger.error(f"Error uploading attachment to S3: {str(e)}")
@@ -248,7 +247,7 @@ async def get_email_attachment(
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Get a specific attachment from an email
+    Get a specific attachment from an email - redirects to S3 URL
     """
     tenant_id = current_user["tenant_id"]
     
@@ -272,24 +271,12 @@ async def get_email_attachment(
                 headers={"Location": attachment["s3_url"]}
             )
         
-        # Fallback to direct content if no S3 URL is available
-        content = attachment.get("content")
-        if not content:
-            raise HTTPException(status_code=404, detail="Attachment has no content")
-        
-        file_content = base64.b64decode(content)
-        
-        # Get content type
-        content_type = attachment.get("content_type", "application/octet-stream")
-        
-        # Return file as a response
-        return Response(
-            content=file_content,
-            media_type=content_type,
-            headers={
-                "Content-Disposition": f"attachment; filename=\"{attachment.get('filename')}\""
-            }
+        # If no S3 URL is available
+        raise HTTPException(
+            status_code=404, 
+            detail="Attachment URL not available"
         )
+        
     except Exception as e:
         logger.error(f"Error retrieving attachment: {str(e)}")
         raise HTTPException(
