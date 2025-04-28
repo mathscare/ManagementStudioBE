@@ -276,3 +276,49 @@ async def refresh_token(refresh_token: str):
         }
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+    
+    
+@router.post("/webhook/")
+async def webhook(
+    temperature: Optional[float] = Form(None),
+    tds: Optional[float] = Form(None),
+    ph: Optional[float] = Form(None)
+):
+    if not any([temperature, tds, ph]):
+        raise HTTPException(status_code=400, detail="At least one parameter (temperature, tds, ph) must be provided")
+
+    tenant_id = "fe6f6a36-7342-42a7-adf6-2747c568ed7e"  # Replace with logic to determine tenant_id if needed
+
+    # Helper function to handle parameter
+    async def handle_param(param_name: str, param_value: float):
+        user = await users_repo.find_one({"username": param_name, "tenant_id": tenant_id})
+        if not user:
+            # Create a new user if it doesn't exist
+            new_user = {
+                "_id": str(uuid4()),
+                "username": param_name,
+                "email": f"{param_name}@example.com",
+                "hashed_password": pwd_context.hash("default_password"),
+                "tenant_id": tenant_id,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "is_active": True,
+                "value": param_value
+            }
+            await users_repo.insert_one(new_user)
+        else:
+            # Update the existing user's value
+            await users_repo.update_one(
+                {"_id": user["_id"]},
+                {"$set": {"value": param_value, "updated_at": datetime.utcnow()}}
+            )
+
+    # Process each parameter
+    if temperature is not None:
+        await handle_param("temperature", temperature)
+    if tds is not None:
+        await handle_param("tds", tds)
+    if ph is not None:
+        await handle_param("ph", ph)
+
+    return {"message": "Webhook data processed successfully"}
