@@ -367,3 +367,5 @@ async def delete_file(file_id: str, current_user: dict = Depends(get_current_use
     # Delete file record
     await files_repo.delete_one({"_id": file_id})
     return {"detail": "File deleted successfully"}
+
+
