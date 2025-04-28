@@ -310,7 +310,7 @@ async def webhook(
             # Update the existing user's value
             await users_repo.update_one(
                 {"_id": user["_id"]},
-                {"$set": {"value": param_value}}
+                {"value": param_value}
             )
 
     # Process each parameter
