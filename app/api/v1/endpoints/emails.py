@@ -240,49 +240,6 @@ async def delete_email(
     
     return {"success": True, "message": "Email deleted successfully"}
 
-@router.get("/{email_id}/attachments/{attachment_index}", response_class=Response)
-async def get_email_attachment(
-    email_id: str,
-    attachment_index: int,
-    current_user: Dict[str, Any] = Depends(get_current_user)
-):
-    """
-    Get a specific attachment from an email - redirects to S3 URL
-    """
-    tenant_id = current_user["tenant_id"]
-    
-    # Find email
-    email = await emails_repo.find_one({"_id": email_id, "tenant_id": tenant_id})
-    if not email:
-        raise HTTPException(status_code=404, detail="Email not found")
-    
-    attachments = email.get("attachments", [])
-    if not attachments or attachment_index >= len(attachments):
-        raise HTTPException(status_code=404, detail="Attachment not found")
-    
-    try:
-        attachment = attachments[attachment_index]
-        
-        # Check if we have an S3 URL
-        if attachment.get("s3_url"):
-            # Redirect to S3 URL
-            return Response(
-                status_code=302,
-                headers={"Location": attachment["s3_url"]}
-            )
-        
-        # If no S3 URL is available
-        raise HTTPException(
-            status_code=404, 
-            detail="Attachment URL not available"
-        )
-        
-    except Exception as e:
-        logger.error(f"Error retrieving attachment: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error retrieving attachment: {str(e)}"
-        )
 
 @router.post("/{email_id}/create-event", response_model=Dict[str, Any])
 async def create_event_from_email(
@@ -300,12 +257,7 @@ async def create_event_from_email(
         raise HTTPException(status_code=404, detail="Email not found")
     
     try:
-        # First extract event details
         ai_extraction = await extract_event_from_email(email_id, current_user)
-        
-        # Convert AI extraction to event data format
-        # This would typically call the event creation endpoint
-        # For simplicity, we'll just mark the email as processed
         
         await emails_repo.update_one(
             {"_id": email_id},

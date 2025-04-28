@@ -7,7 +7,7 @@ class Attachment(BaseModel):
     """Email attachment model"""
     filename: str
     content_type: Optional[str] = None
-    content: Optional[str] = None  # Base64 encoded content - only used for upload, not stored
+    content: Optional[str] = None  
     size: Optional[int] = None
     content_id: Optional[str] = None
     s3_key: Optional[str] = None
@@ -19,14 +19,12 @@ class Attachment(BaseModel):
         import base64
         if v:
             try:
-                # Just testing if it's valid base64
                 base64.b64decode(v)
             except Exception:
                 raise ValueError("Attachment content must be valid base64")
         return v
 
     class Config:
-        # Exclude content field from response models by default
         exclude = {"content"}
 
 class EmailData(BaseModel):

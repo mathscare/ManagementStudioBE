@@ -7,4 +7,5 @@ from .files import *
 from .tags import *
 from .events import *
 from .tasks import *
-from .maps import CountriesRepository, StatesRepository, CitiesRepository
+from .maps import *
+from .emails import *

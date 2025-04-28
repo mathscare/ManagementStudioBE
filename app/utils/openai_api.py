@@ -49,118 +49,78 @@ class GPT():
         return json.loads(response['choices'][0]['message']['content'])
 
         
-    async def send_image(self,image_path : str,prompt : str):
+    async def send_image(self, image_path: str, prompt: str,response_model:BaseModel = None):
 
         try:
             encoded_image = None
-            async with aiofiles.open(image_path,'rb') as f:
+            async with aiofiles.open(image_path, "rb") as f:
                 image_data = await f.read()
-                encoded_image = base64.b64encode(image_data).decode('utf-8')
-            
+                encoded_image = base64.b64encode(image_data).decode("utf-8")
+
             if not encoded_image:
-                raise HTTPException(status_code=500,
-                                    detail="Error encoding image")
-            
-            headers = {
-              "Content-Type": "application/json",
-              "Authorization": f"Bearer {self.__API_KEY}"
-            }
+                raise HTTPException(status_code=500, detail="Error encoding image")
 
-            payload = {
-                  "model": "gpt-4o",
-                  "messages": [
-                    {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
+            response_data = await self.client.beta.chat.completions.parse(
+                model=self.model,
+                messages=[
                     {
-                      "role": "user",
-                      "content": [
-                        {
-                          "type": "text",
-                          "text": f"{prompt}"
-                        },
-                        {
-                          "type": "image_url",
-                          "image_url": {
-                            "url": f"data:image/jpeg;base64,{encoded_image}",
-                            "detail": "high"
-                          }
-                        }
-                      ]
-                    }
-                  ],
-                  "max_tokens" : 16384,
-                "response_format" : {"type": "json_object" }
-                }
-            
-            client = await self.get_http_client()
+                        "role": "system",
+                        "content": "You are a helpful assistant designed to output JSON.",
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"{prompt}"},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{encoded_image}",
+                                    "detail": "high",
+                                },
+                            },
+                        ],
+                    },
+                ],
+                max_tokens=16384,
+                response_format=response_model if response_model else {"type": "json_object"},
+            )
 
-            async with client.post(url = "https://api.openai.com/v1/chat/completions", headers=headers, json=payload) as response:
-                if response.status != 200:
-                    raise HTTPException(status_code=response.status, detail=f"API request failed with status code {response.status}")
-                response_data = await response.json()
-                response_data = response_data['choices'][0]['message']['content']
-                if response_data == 'NULL':
-                    raise HTTPException(status_code=400,
-                                        detail="CHASSIS NOT VISIBLE")
-              
-                response_data = re.sub(r'```json\n|```', '', response_data, flags=re.MULTILINE)
-
-                if isinstance(response_data,str) : 
-                    response_data = json.loads(response_data)
-                return response_data
+            response_data = response_data.to_dict()
+            return json.loads(response_data["choices"][0]["message"]["content"])
 
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
 
-    async def send_images(self,image_paths : list[str],prompt : str):
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
+
+    async def send_images(self, image_paths: list[str], prompt: str, response_model:BaseModel = None):
         try:
             encoded_images = []
             encoding_task = [image_encoder(image_path) for image_path in image_paths]
 
             encoded_images = await asyncio.gather(*encoding_task)
+            content = [{"type": "text", "text": f"{prompt}"}]
 
-            headers = {
-              "Content-Type": "application/json",
-              "Authorization": f"Bearer {self.__API_KEY}"
-            }
-
-            payload = {
-                  "model": "gpt-4o",
-                  "messages": [
+            for encoded_image in encoded_images:
+                content.append(
                     {
-                      "role": "user",
-                      "content": [
-                        {
-                          "type": "text",
-                          "text": f"{prompt}"
-                        } 
-                      ]
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encoded_image}",
+                            "detail": "high",
+                        },
                     }
-                  ],
-                  "max_tokens" : 16384,
+                )
 
-                "response_format" : {"type": "json_object" }
-                }
-            
-            
-            image_payloads = [
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{encoded_image}",
-                        "detail": "high"
-                    }
-                }
-                for encoded_image in encoded_images
-            ]
-            payload['messages'][0]['content'].extend(image_payloads)
-            client = await self.get_http_client()
-            async with client.post(url = "https://api.openai.com/v1/chat/completions", headers=headers, json=payload) as response:
-                if response.status != 200:
-                    raise HTTPException(status_code=response.status, detail=f"API request failed with status code {response.status}")
-                response_data = await response.json()
-                response_data = response_data['choices'][0]['message']['content']
-                
-                return response_data
+            response_data = await self.client.beta.chat.completions.parse(
+                model=self.model,
+                messages=[{"role": "user", "content": content}],
+                response_format= response_model if response_model else {"type": "json_object"},
+            )
+
+            response_data = response_data.to_dict()
+            return response_data["choices"][0]["message"]["content"]
 
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"An error occurred: {e}")

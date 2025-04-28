@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body, Query,Response,Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body, Query, Response, Form
 from typing import List, Optional, Dict, Any
 import json
+import tempfile
+import os
 from datetime import datetime, date, timedelta
 from uuid import uuid4
 from io import BytesIO
@@ -16,7 +18,7 @@ from app.core.security import get_current_user
 from app.utils.csv_utils import generate_model_csv
 from pydantic import BaseModel
 from app.utils.openai_api import gpt
-from fastapi.responses import StreamingResponse
+from app.utils.pdf_utils import convert_pdf_to_images
 from dateutil import parser as date_parser
 
 
@@ -45,7 +47,6 @@ async def create_event(
 ):
     tenant_id = current_user["tenant_id"]
     
-    # Create event with additional fields
     event_dict = event_data.dict()
     event_dict["_id"] = str(uuid4())
     event_dict["tenant_id"] = tenant_id
@@ -54,7 +55,6 @@ async def create_event(
     event_dict["updated_at"] = datetime.utcnow()
     event_dict["is_active"] = True
     
-    # Set default values for camera man fields if not provided
     if "is_camera_man_hired" not in event_dict:
         event_dict["is_camera_man_hired"] = False
     if "camera_man_number" not in event_dict:
@@ -62,18 +62,14 @@ async def create_event(
     if "camera_man_name" not in event_dict:
         event_dict["camera_man_name"] = ""
     
-    # Prepare for MongoDB storage
     event_dict = prepare_event_for_storage(event_dict)
     
-    # Insert into database
     await events_repo.insert_one(event_dict)
     
-    # Get the created event
     created_event = await events_repo.find_one({"_id": event_dict["_id"]})
     
-    # Convert for response
     created_event["attachments"] = created_event["attachments"].split(",") if created_event["attachments"] else []
-    created_event["id"] = created_event.pop("_id")  # Replace _id with id for response
+    created_event["id"] = created_event.pop("_id") 
     
     return Event(**created_event)
 
@@ -466,12 +462,14 @@ async def delete_event_attachments(
 @router.post("/extract-from-email", response_model=AIEventExtraction)
 async def extract_event_from_email(
     email_text: str = Form(..., description="Email text to extract event details from"),
+    files: Optional[List[UploadFile]] = File(None, description="Optional files (images or PDFs) to include for extraction"),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     try:
+        # Common prompt for both text and image-based extraction
         prompt = """
-        You are an AI assistant that extracts event information from emails.
-        Extract the following fields from the email text:
+        You are an AI assistant that extracts event information from emails and attached images or documents.
+        Extract the following fields from the provided content:
         - event_name: Name of the event
         - description: Description of the event
         - event_date: Date of the event in YYYY-MM-DD format
@@ -488,16 +486,74 @@ async def extract_event_from_email(
         - travel_accomodation: Travel and accommodation details
         - status: Current status of the event planning
         
-        For each field, provide The extracted value or null if you can't extract it
-        
+        For each field, provide the extracted value or null if you can't extract it.
         Respond with a JSON object that follows the specified schema.
         """
         
-        # Add the email text as user message
-        text = f"Email text: {email_text}"        
-        ai_extraction = await gpt.send_text(text=text, prompt=prompt, model=AIEventExtraction)
-        print(ai_extraction)
+        image_paths = []
+        pdf_files = []
+        ai_extraction = None
         
+        # Process uploaded files
+        if files:
+            for file in files:
+                if file.filename.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif')):
+                    try:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_img:
+                            temp_img.write(await file.read())
+                            image_paths.append(temp_img.name)
+                    except Exception as e:
+                        print(f"Error saving uploaded image {file.filename}: {str(e)}")
+                elif file.filename.lower().endswith('.pdf'):
+                    # Rewind the file before adding it to the list
+                    await file.seek(0)
+                    pdf_files.append(file)
+        
+        # Process PDF files - convert to images
+        if pdf_files:
+            try:
+                for pdf_file in pdf_files:
+                    # Convert PDF to images
+                    pdf_images = await convert_pdf_to_images(pdf_file)
+                    image_paths.extend(pdf_images)
+            except Exception as e:
+                print(f"Error processing PDF files: {str(e)}")
+        
+        # Validate image paths exist before proceeding
+        valid_image_paths = [path for path in image_paths if os.path.exists(path)]
+        print(f"Valid image paths: {valid_image_paths}")
+        # Try to use images if we have valid paths
+        if valid_image_paths:
+            try:
+                enhanced_prompt = f"Email text: {email_text}\n\nAnalyze the email text and any provided images or document scans to extract event details."
+                ai_extraction = await gpt.send_images(image_paths=valid_image_paths, prompt=enhanced_prompt,response_model=AIEventExtraction)
+                print(f"Image extraction result type: {type(ai_extraction)}")
+            except Exception as e:
+                print(f"Error with send_images, falling back to text only: {str(e)}")
+                # If image processing failed, we'll fall back to text-only
+                ai_extraction = None
+            
+            # Parse string response if needed
+            if isinstance(ai_extraction, str):
+                try:
+                    ai_extraction = json.loads(ai_extraction)
+                except Exception as e:
+                    print(f"Error parsing image extraction result as JSON: {str(e)}")
+        
+        # If images failed or weren't provided, use text-only
+        if ai_extraction is None:
+            text = f"Email text: {email_text}"
+            ai_extraction = await gpt.send_text(text=text, prompt=prompt, model=AIEventExtraction)
+        
+        # Clean up temporary files
+        for path in image_paths:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception as e:
+                    print(f"Error removing temp file {path}: {str(e)}")
+        
+        # Process extraction results
         event_data = {
             "contact_name": None,
             "contact_number": None,
@@ -518,17 +574,19 @@ async def extract_event_from_email(
             "camera_man_number": None
         }
         
-        # Check if ai_extraction is a dictionary or an object
+        # Extract fields from the AI response
         if isinstance(ai_extraction, dict):
-            # Process as dictionary
             for field in event_data:
                 if field in ai_extraction and ai_extraction[field] is not None:
                     event_data[field] = ai_extraction[field]
         else:
-            # Process as object with attributes
             for field in event_data:
                 if hasattr(ai_extraction, field) and getattr(ai_extraction, field) is not None:
                     event_data[field] = getattr(ai_extraction, field)
+        
+        # Set default event date if missing to avoid validation errors
+        if not event_data["event_date"]:
+            event_data["event_date"] = datetime.now().date().isoformat()
         
         try:
             return AIEventExtraction(**event_data)
@@ -536,6 +594,15 @@ async def extract_event_from_email(
             raise HTTPException(status_code=422, detail=f"Invalid event data format: {str(e)}")
             
     except Exception as e:
+        # Ensure any temporary files are cleaned up in case of error
+        if 'image_paths' in locals() and image_paths:
+            for path in image_paths:
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except:
+                        pass
+                        
         raise HTTPException(status_code=500, detail=f"Error extracting event information: {str(e)}")
 
 def convert_to_date(date_string: str) -> date:
@@ -553,16 +620,14 @@ def convert_to_date(date_string: str) -> date:
         ValueError: If the date string cannot be parsed
     """
     try:
-        # Try parsing with dateutil parser which handles many formats
         parsed_date = date_parser.parse(date_string, fuzzy=True)
         return parsed_date.date()
     except Exception:
-        # If dateutil fails, try common formats manually
         formats = [
-            "%Y-%m-%d",           # 2023-01-15
-            "%d/%m/%Y",           # 15/01/2023
-            "%m/%d/%Y",           # 01/15/2023
-            "%d-%m-%Y",           # 15-01-2023
+            "%Y-%m-%d",           
+            "%d/%m/%Y",           
+            "%m/%d/%Y",           
+            "%d-%m-%Y",           
             "%d %B %Y",           # 15 January 2023
             "%d %b %Y",           # 15 Jan 2023
             "%B %d, %Y",          # January 15, 2023
