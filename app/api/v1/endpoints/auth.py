@@ -322,3 +322,16 @@ async def webhook(
         await handle_param("ph", ph)
 
     return {"message": "Webhook data processed successfully"}
+
+@router.get("/values/")
+async def get_values():
+    tenant_id = "fe6f6a36-7342-42a7-adf6-2747c568ed7e"  # Replace with logic to determine tenant_id if needed
+    temprature = await users_repo.find_one({"username": "temperature", "tenant_id": tenant_id})
+    tds = await users_repo.find_one({"username": "tds", "tenant_id": tenant_id})
+    ph = await users_repo.find_one({"username": "ph", "tenant_id": tenant_id})
+    
+    return {
+        "temperature": temprature["value"] if temprature else None,
+        "tds": tds["value"] if tds else None,
+        "ph": ph["value"] if ph else None
+    }
